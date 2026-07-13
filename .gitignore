@@ -1,0 +1,27 @@
+# Data
+data/
+*.csv
+*.parquet
+*.pkl
+*.joblib
+
+# Credentials
+.env
+kaggle.json
+*.pem
+
+# Python
+__pycache__/
+*py[cod]
+.venv/
+.ipynb_checkpoints/
+.pytest_cache/
+.ruff_cache/
+
+# Model artifacts
+models/*.txt
+models/*.lgb
+
+# System
+.DS_Store
+!data/**/.gitkeep
