@@ -1,5 +1,7 @@
 # Data
-data/
+# Anchored to the project root on purpose: an unanchored "data/" also matches
+# src/fraudq/data/, which is the ingest package, not a dataset.
+/data/
 *.csv
 *.parquet
 *.pkl
@@ -21,6 +23,12 @@ __pycache__/
 # Model artifacts
 models/*.txt
 models/*.lgb
+models/artifacts/
+
+# Pipeline outputs. The figures under reports/figures/ ARE versioned: the README
+# renders them.
+reports/*.parquet
+reports/*.csv
 
 # System
 .DS_Store
