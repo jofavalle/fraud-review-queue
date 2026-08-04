@@ -131,19 +131,36 @@ next, rather than what to tune in the model.
 ## Run it
 
 ```bash
-# Requires a Kaggle account; the competition rules must be accepted first.
-./scripts/download_data.sh
-
 uv sync
-uv run python -m fraudq.pipeline        # ingest → features → train → calibrate → evaluate
+
+# The whole chain on synthetic data: no Kaggle account, no download, seconds.
+# It proves the pipeline runs; it says nothing about fraud.
+uv run python -m fraudq.pipeline --synthetic
+```
+
+With the real data:
+
+```bash
+# Requires a Kaggle account, and the competition rules accepted once on the web:
+# https://www.kaggle.com/c/ieee-fraud-detection/rules
+./scripts/download_data.sh              # -> data/raw/train_*.csv
+uv run python -m fraudq.data.ingest     # -> data/processed/*.parquet
+
+uv run python -m fraudq.pipeline        # features -> split -> train -> calibrate -> evaluate
 uv run streamlit run app/streamlit_app.py
 ```
 
-Or:
+The pipeline writes `reports/scored_calib.parquet`, `reports/scored_test.parquet`,
+`reports/policy_comparison.csv` and `models/artifacts/`. Everything downstream —
+the sensitivity sweep, the drift report, the API and the queue simulator — reads
+those, so **the test partition is scored once and never looked at again**.
+
+The scoring API ships as a container. Model artifacts are mounted, not baked in:
+the image is the code, the model is data with its own lifecycle.
 
 ```bash
-docker build -t fraudq .
-docker run -p 8501:8501 fraudq
+docker build -t fraud-review-queue .
+docker run --rm -p 8000:8000 -v $PWD/models/artifacts:/models fraud-review-queue
 ```
 
 The **queue simulator** lets you move analyst capacity and each cost assumption
@@ -157,9 +174,10 @@ them.
 ```
 src/fraudq/
 ├── config.py           # every cost and policy assumption, in one place
-├── data/               # ingest (CSV → parquet), temporal split
+├── pipeline.py         # the driver: chains the stages below end to end
+├── data/               # ingest (CSV → parquet), temporal split, synthetic data
 ├── features/           # UID construction, backward-looking aggregates
-├── models/             # training, probability calibration
+├── models/             # training, probability calibration, artifact persistence
 ├── policy/             # cost functions, value of review, capacity allocation
 ├── evaluate/           # metrics, policy comparison, sensitivity, drift
 └── api/                # FastAPI scoring endpoint
@@ -167,6 +185,7 @@ src/fraudq/
 tests/                  # including the temporal leakage guard
 docs/design.md          # cost model, derivations, project invariants
 app/                    # queue simulator
+scripts/                # Kaggle download
 ```
 
 ---
