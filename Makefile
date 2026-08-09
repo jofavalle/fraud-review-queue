@@ -1,6 +1,6 @@
-# make data | pipeline | analysis | smoke | test | lint | format | app | api | docker
+# make data | pipeline | analysis | diagnostics | smoke | test | lint | format | app | api | docker
 
-.PHONY: data pipeline analysis smoke test lint format app api docker docker-run
+.PHONY: data pipeline analysis diagnostics smoke test lint format app api docker docker-run
 
 data:            ## Fetch IEEE-CIS and convert it to Parquet
 	./scripts/download_data.sh
@@ -11,6 +11,9 @@ pipeline:        ## The full chain over the real data (needs `make data`)
 
 analysis:        ## Sensitivity sweep and drift, off the persisted scoring (needs `make pipeline`)
 	python -m fraudq.analysis
+
+diagnostics:     ## Model diagnostics: importance, curves, KS, PSI and the learning curve
+	python -m fraudq.diagnostics --learning-curve
 
 smoke:           ## The same chain over synthetic data, no Kaggle, in seconds
 	python -m fraudq.pipeline --synthetic

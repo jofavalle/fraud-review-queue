@@ -66,12 +66,17 @@ _LGBM_PARAMS = {
 
 @pytest.fixture(scope="module")
 def scored() -> pd.DataFrame:
-    """A scored partition with signal: `p` correlates with the label."""
+    """A scored partition with signal: `p` correlates with the label.
+
+    Shaped like `reports/scored_test.parquet`, `day` included, because the
+    operating points are allocated per day exactly as the policies allocate.
+    """
     rng = np.random.default_rng(7)
     n = 3_000
     p = rng.beta(0.8, 8.0, size=n)
     return pd.DataFrame(
         {
+            "day": np.repeat(np.arange(30), n // 30),
             "p": p,
             "TransactionAmt": rng.lognormal(4.0, 1.2, size=n),
             "isFraud": rng.binomial(1, np.clip(p * 2.5, 0.0, 0.95)),
@@ -278,11 +283,38 @@ def test_a_value_ranked_queue_need_not_land_on_the_roc_curve(scored):
     assert distance > 1e-6
 
 
-def test_operating_points_table_reports_both_queues(scored):
-    table = operating_points_table(scored, COSTS, capacity=200)
-    assert table["queue"].tolist() == ["topk_by_score", "topk_by_value"]
-    assert (table["k"] == 200).all()
+def test_operating_points_table_reports_the_reference_and_both_policies(scored):
+    table = operating_points_table(scored, COSTS, capacity_pct=0.05)
+    assert table["queue"].tolist() == [
+        "global_topk_by_score",
+        "daily_topk_by_score",
+        "daily_topk_by_value",
+    ]
     assert table[["tpr", "fpr", "precision"]].notna().all().all()
+    # All three are drawn at the same total spend, or they would not be
+    # comparable. The score-ranked queue always fills its capacity; the
+    # value-ranked one may leave some unspent when V > 0 does not bind.
+    assert table.loc[0, "k"] == table.loc[1, "k"] == table.loc[1, "capacity"]
+    assert table.loc[2, "k"] <= table.loc[2, "capacity"]
+
+
+def test_the_daily_constraint_alone_moves_a_score_ranked_queue_off_the_curve(scored):
+    """The finding that makes figure 7 worth three markers instead of two.
+
+    Capacity renews every day, so a daily queue has to take the best cases of
+    each day rather than the best of the window, and that alone is enough to
+    leave the ROC. Whatever distance is left to the value-ranked point is the
+    part that is genuinely about ranking."""
+    table = operating_points_table(scored, COSTS, capacity_pct=0.05)
+    roc = roc_points(scored["isFraud"], scored["p"], max_points=len(scored) + 2)
+
+    distances = [
+        _distance_to_polyline(row.fpr, row.tpr, roc["fpr"], roc["tpr"])
+        for row in table.itertuples()
+    ]
+    assert distances[0] == pytest.approx(0.0, abs=1e-12)  # the global reference
+    assert distances[1] > 1e-6  # policy 3, off the curve already
+    assert distances[2] > distances[1]  # policy 4, further still
 
 
 # --------------------------------------------------------------------- KS

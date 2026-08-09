@@ -218,30 +218,21 @@ def pr_points(y_true, scores, max_points: int = CURVE_MAX_POINTS) -> pd.DataFram
     ).reset_index(drop=True)
 
 
-def queue_operating_point(y_true, ranking, k: int, label: str = "") -> dict:
-    """Where a review queue of size K, filled by `ranking`, sits in ROC and PR space.
+def operating_point(y_true, review_mask, label: str = "") -> dict:
+    """Where a review set sits in ROC and PR space.
 
-    For the review set R of the top K by `ranking`:
+    For the review set R that `review_mask` selects:
 
-        tpr = |fraud in R| / |all fraud|          (recall at K)
+        tpr = |fraud in R| / |all fraud|
         fpr = |legitimate in R| / |all legitimate|
-        precision = |fraud in R| / K
+        precision = |fraud in R| / |R|
 
-    **The point of computing this.** With `ranking = p`, R is the top-K by score
-    and the point lies ON the ROC curve by construction: that is the definition
-    of a ROC point. With `ranking = V`, R is a different set of the same size,
-    so the point lands wherever it lands and has no obligation to touch the
-    curve. The ROC describes ranking by score and nothing else, and the thesis
-    of this project (design.md §2.4) is that a queue should deliberately sit
-    somewhere the ROC does not describe. Plotting both makes that visible in one
-    figure instead of asserting it.
-
-    A caveat worth keeping attached to the number: `tpr` here counts fraud that
+    A caveat worth keeping attached to the number: `tpr` counts fraud that
     reached an ANALYST. It is not the "fraud caught" column of the policy table,
     which also counts fraud the automatic rule blocked outside the queue.
     """
     y = np.asarray(y_true, dtype=float)
-    mask = _top_k_mask(ranking, k)
+    mask = np.asarray(review_mask, dtype=bool)
 
     n_pos = float(y.sum())
     n_neg = float(len(y) - n_pos)
@@ -258,31 +249,82 @@ def queue_operating_point(y_true, ranking, k: int, label: str = "") -> dict:
     }
 
 
+def queue_operating_point(y_true, ranking, k: int, label: str = "") -> dict:
+    """The operating point of a GLOBAL top-K by `ranking`, over the whole window.
+
+    With `ranking = p` this point lies ON the ROC curve by construction: taking
+    the top K by score is a threshold on the score, which is what a ROC point
+    is. That makes it the right reference to draw the other points against, and
+    `operating_points_table` reports it as such.
+
+    It is a reference and not a policy. The policies allocate PER DAY, because
+    analyst capacity renews daily (design.md §2.3), and the union of daily
+    queues is not a global threshold cut.
+    """
+    return operating_point(y_true, _top_k_mask(ranking, k), label=label)
+
+
 def operating_points_table(
     df: pd.DataFrame,
     cfg,
-    capacity: int,
+    capacity_pct: float,
     p_col: str = "p",
     amt_col: str = "TransactionAmt",
+    day_col: str = "day",
     target: str = "isFraud",
 ) -> pd.DataFrame:
-    """The two queue compositions of design.md §7.1 as points, for the ROC figure.
+    """The three points figure 7 marks on the ROC, and what each one is for.
 
-    Policy 3 ranks by `p`, policy 4 by the value of a review. `cfg` is passed
-    explicitly and never read from a global, which is invariant 8 of §9.
+    | queue                | what it is                                        |
+    |----------------------|---------------------------------------------------|
+    | `global_topk_by_score` | The reference. A global threshold, so ON the curve. |
+    | `daily_topk_by_score`  | Policy 3, allocated per day as it really runs.    |
+    | `daily_topk_by_value`  | Policy 4, this project's queue.                   |
+
+    **Reading the three of them together is the point.** The ROC curve is an
+    object about global thresholds, and a review queue is not one: capacity
+    renews every day, so the same total spend is forced to take the best cases
+    of each day rather than the best cases of the window. That constraint alone
+    already moves a SCORE-ranked queue off the curve, before any question of how
+    the queue is ranked. The distance from the second point to the third is then
+    the part that is about ranking, which is the thesis of design.md §2.4.
+
+    The two daily rows come from `simulate_queue` running the same policy
+    functions the published results table used, so these points and that table
+    describe one and the same allocation rather than two similar ones. `cfg` is
+    passed explicitly and never read from a global, which is invariant 8 of §9.
     """
-    from fraudq.policy.costs import value_of_review
+    from fraudq.evaluate.policies import actions_topk_by_score, actions_topk_by_value
+    from fraudq.policy.simulate import simulate_queue
 
     y = df[target].to_numpy()
-    p = df[p_col].to_numpy(dtype=float)
-    value = value_of_review(p, df[amt_col].to_numpy(dtype=float), cfg)
+    rows = []
+    for label, policy in (
+        ("daily_topk_by_score", actions_topk_by_score),
+        ("daily_topk_by_value", actions_topk_by_value),
+    ):
+        result = simulate_queue(
+            df,
+            policy,
+            cfg,
+            capacity_pct,
+            p_col=p_col,
+            amt_col=amt_col,
+            day_col=day_col,
+            target=target,
+        )
+        mask = (result.actions == "review").to_numpy()
+        rows.append({**operating_point(y, mask, label=label), "capacity": result.capacity})
 
-    return pd.DataFrame(
-        [
-            queue_operating_point(y, p, capacity, label="topk_by_score"),
-            queue_operating_point(y, value, capacity, label="topk_by_value"),
-        ]
+    # The reference is drawn at the SAME total spend as the policies, so the
+    # three points are comparable rather than three different budgets.
+    total_capacity = int(rows[0]["capacity"])
+    reference = queue_operating_point(
+        y, df[p_col].to_numpy(dtype=float), total_capacity, label="global_topk_by_score"
     )
+    reference["capacity"] = total_capacity
+
+    return pd.DataFrame([reference, *rows])
 
 
 # ---------------------------------------------------------------------------
