@@ -10,8 +10,9 @@ of truth, not a `requirements.txt`.
 
 ```bash
 uv sync
-uv run ruff check src tests app     # the verification gate
-uv run pytest -q                    # the full suite
+uv run ruff check src tests app            # lint, the verification gate
+uv run ruff format --check src tests app   # and formatting, same paths
+uv run pytest -q                           # the full suite
 ```
 
 `.venv/` is never committed and does not travel between machines. Rebuild it on

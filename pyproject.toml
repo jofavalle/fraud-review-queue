@@ -49,5 +49,10 @@ line-length = 100
 # repository red without a line of code changing. E402 lives inside E4, which
 # is what makes the `# noqa: E402` on an import placed after a
 # `pytest.importorskip` a justified suppression rather than dead weight.
+#
+# E501 is the one addition to that historical default, and it is here because
+# the formatter does not cover it: `ruff format` rewraps code, never the text
+# inside a comment or a string. Without E501 an overlong line of prose reaches
+# the repository unopposed.
 [tool.ruff.lint]
-select = ["E4", "E7", "E9", "F"]
+select = ["E4", "E7", "E9", "F", "E501"]

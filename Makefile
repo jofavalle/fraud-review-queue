@@ -1,6 +1,6 @@
-# make data | pipeline | analysis | smoke | test | lint | app | api | docker  (design.md §9)
+# make data | pipeline | analysis | smoke | test | lint | format | app | api | docker
 
-.PHONY: data pipeline analysis smoke test lint app api docker docker-run
+.PHONY: data pipeline analysis smoke test lint format app api docker docker-run
 
 data:            ## Descarga IEEE-CIS y convierte a Parquet
 	./scripts/download_data.sh
@@ -18,8 +18,12 @@ smoke:           ## La misma cadena sobre datos sintéticos, sin Kaggle y en seg
 test:            ## La suite completa (las specs del Día 6 incluidas)
 	pytest -q
 
-lint:            ## El mismo lint que corre el CI
+lint:            ## La misma puerta que corre el CI: lint y formato
 	ruff check src tests app
+	ruff format --check src tests app
+
+format:          ## Aplica el formato en vez de comprobarlo
+	ruff format src tests app
 
 app:             ## El simulador de cola (necesita reports/scored_test.parquet)
 	streamlit run app/streamlit_app.py

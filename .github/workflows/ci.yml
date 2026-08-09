@@ -1,4 +1,5 @@
-# CI: ruff + pytest (design.md §11.3).
+# CI: ruff check, ruff format --check, pytest. The same gate a developer runs
+# locally, on the same paths.
 #
 # Badge for the README:
 #   [![CI](https://github.com/jofavalle/fraud-review-queue/actions/workflows/ci.yml/badge.svg)](https://github.com/jofavalle/fraud-review-queue/actions/workflows/ci.yml)
@@ -33,6 +34,11 @@ jobs:
 
       - name: Lint (ruff)
         run: uv run ruff check src tests app
+
+      # Formatting is checked, not applied. Left to a habit it drifts silently:
+      # eighteen files had accumulated before anything asked.
+      - name: Format (ruff)
+        run: uv run ruff format --check src tests app
 
       - name: Tests
         run: uv run pytest -q
