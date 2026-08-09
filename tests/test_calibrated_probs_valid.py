@@ -1,17 +1,13 @@
-"""Test de calibración — completo (columna delegable del plan §5.3).
+"""Calibration test: valid probabilities, and monotonic in the raw score.
 
-Va en: fraud-review-queue/tests/test_calibrated_probs_valid.py
+Probabilities must land in [0,1] and stay monotonic with respect to the raw
+score, and the calibration metrics are checked against cases worked out by
+hand. Monotonicity is the assertion worth understanding: a calibrator that
+reorders the scores is not calibrating, it is changing the model's ranking.
 
-Es el quinto test de la tabla de design.md §10: probabilidades válidas
-(en [0,1]) y monotónicas respecto del score crudo, más las métricas de
-calibración verificadas contra casos calculados a mano. Como el test del
-split: mecánico, pero léelo y sé capaz de explicar cada aserción — en
-particular POR QUÉ la monotonía importa (un calibrador que reordena los
-scores ya no calibra: cambia el ranking del modelo).
-
-Los datos sintéticos codifican el escenario real: un score que RANKEA bien
-pero está mal calibrado (sobreconfiado). Calibrar debe mejorar Brier sin
-tocar el orden.
+The synthetic data encodes the real scenario: a score that RANKS well but is
+badly calibrated, being overconfident. Calibrating must improve Brier without
+touching the order.
 """
 
 from __future__ import annotations
@@ -27,16 +23,17 @@ from fraudq.evaluate.metrics import (
 )
 
 sklearn = pytest.importorskip(
-    "sklearn", reason="los calibradores usan sklearn (está en el entorno del repo)"
+    "sklearn", reason="the calibrators use sklearn, which is in the repo environment"
 )
 
 from fraudq.models.calibrate import fit_isotonic, fit_platt  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
-# Fixture: score sobreconfiado con ranking correcto.
-# La probabilidad REAL es sigmoid(z); el score reportado es sigmoid(2.5 z + 1):
-# misma información, escala distorsionada — la firma de un modelo sin calibrar.
+# Fixture: an overconfident score with a correct ranking.
+# The REAL probability is sigmoid(z); the reported score is sigmoid(2.5 z + 1):
+# the same information on a distorted scale, the signature of an uncalibrated
+# model.
 # ---------------------------------------------------------------------------
 
 
@@ -47,18 +44,18 @@ def _sigmoid(z):
 @pytest.fixture(scope="module")
 def miscalibrated():
     rng = np.random.default_rng(42)
-    z = rng.normal(-2.0, 1.5, size=6000)  # mayoría de casos "legítimos"
+    z = rng.normal(-2.0, 1.5, size=6000)  # mostly legitimate cases
     p_true = _sigmoid(z)
     y = (rng.random(6000) < p_true).astype(int)
     scores = _sigmoid(2.5 * z + 1.0)
-    # Mitad para ajustar el calibrador, mitad para evaluarlo.
+    # Half to fit the calibrator, half to evaluate it.
     return {
         "fit": (scores[:3000], y[:3000]),
         "eval": (scores[3000:], y[3000:]),
     }
 
 
-# ------------------------------------------------------------------ contrato
+# ------------------------------------------------------------------ contract
 
 
 def test_probabilities_live_in_unit_interval(miscalibrated):
@@ -71,11 +68,11 @@ def test_probabilities_live_in_unit_interval(miscalibrated):
 
 
 def test_calibrators_are_monotone_wrt_raw_score(miscalibrated):
-    """Calibrar NO puede reordenar: score_i >= score_j => p_i >= p_j.
+    """Calibrating must NOT reorder: score_i >= score_j => p_i >= p_j.
 
-    Si esto falla, el "calibrador" está cambiando el ranking del modelo — y
-    entonces precision@K antes y después de calibrar serían distintas, que es
-    otra forma de decir que ya no es el mismo modelo.
+    If this fails, the "calibrator" is changing the model's ranking, and
+    precision@K before and after calibrating would differ, which is another way
+    of saying it is no longer the same model.
     """
     s_fit, y_fit = miscalibrated["fit"]
     grid = np.linspace(0.001, 0.999, 500)
@@ -85,10 +82,10 @@ def test_calibrators_are_monotone_wrt_raw_score(miscalibrated):
 
 
 def test_calibration_improves_brier_out_of_sample(miscalibrated):
-    """Sobre un score genuinamente descalibrado, calibrar debe pagar.
+    """On a genuinely miscalibrated score, calibrating must pay off.
 
-    Se evalúa FUERA de los datos de ajuste (mitad eval): la misma disciplina
-    que el holdout temporal dentro de calib.
+    It is evaluated OUTSIDE the fitting data, on the eval half: the same
+    discipline as the temporal holdout inside calib.
     """
     s_fit, y_fit = miscalibrated["fit"]
     s_eval, y_eval = miscalibrated["eval"]
@@ -97,7 +94,7 @@ def test_calibration_improves_brier_out_of_sample(miscalibrated):
         assert brier_score(y_eval, cal.predict(s_eval)) < raw
 
 
-# ------------------------------------------- métricas: casos hechos a mano
+# ------------------------------------------- the metrics, on hand-made cases
 
 
 def test_brier_hand_cases():
@@ -107,10 +104,10 @@ def test_brier_hand_cases():
 
 
 def test_ece_hand_case():
-    """Dos grupos, calculado con lápiz.
+    """Two groups, worked out with a pencil.
 
-    Bin [0, 0.1): 4 casos con p=0.05, 1 positivo -> |0.25 - 0.05| = 0.20, w=0.4
-    Bin [0.9, 1): 6 casos con p=0.95, 5 positivos -> |5/6 - 0.95| ≈ 0.1167, w=0.6
+    Bin [0, 0.1): 4 cases at p=0.05, 1 positive -> |0.25 - 0.05| = 0.20, w=0.4
+    Bin [0.9, 1): 6 cases at p=0.95, 5 positive -> |5/6 - 0.95| = 0.1167, w=0.6
     ECE = 0.4 * 0.20 + 0.6 * 0.1167 = 0.15
     """
     p = np.array([0.05] * 4 + [0.95] * 6)
@@ -119,7 +116,7 @@ def test_ece_hand_case():
 
 
 def test_ece_zero_when_perfectly_calibrated_bins():
-    # En cada bin, frac_pos == mean_p exactamente.
+    # In each bin, frac_pos == mean_p exactly.
     p = np.array([0.25] * 4 + [0.75] * 4)
     y = np.array([1, 0, 0, 0] + [1, 1, 1, 0])
     assert ece(y, p, n_bins=4) == pytest.approx(0.0, abs=1e-12)
@@ -137,11 +134,11 @@ def test_calibration_by_decile_shape_and_gap(miscalibrated):
     s_eval, y_eval = miscalibrated["eval"]
     table = calibration_by_decile(y_eval, s_eval)
     assert len(table) == 10
-    # count debe repartirse en décimas (rank method="first" desempata parejo)
+    # count splits into tenths; rank method="first" breaks ties evenly
     assert table["count"].sum() == len(s_eval)
     assert (table["gap"] >= 0).all()
-    # El score de la fixture es sobreconfiado en el extremo alto: el decil
-    # superior debe mostrar un gap POSITIVO claro (mean_p > frac_pos). Es la
-    # razón de reportar por decil: este error es invisible en el agregado.
+    # The fixture's score is overconfident at the high end, so the top decile
+    # must show a clearly POSITIVE gap, mean_p > frac_pos. That is the reason
+    # to report by decile: this error is invisible in the aggregate.
     top = table.iloc[-1]
     assert top["mean_p"] > top["frac_pos"]

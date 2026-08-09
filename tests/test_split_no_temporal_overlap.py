@@ -1,15 +1,11 @@
-"""Test del split temporal — completo (columna delegable del plan §5.3).
+"""Temporal split: a structural property, checked mechanically.
 
-Va en: fraud-review-queue/tests/test_split_no_temporal_overlap.py
+The partitions do not overlap, the embargo exists and nothing uses it, and the
+expanding-window folds never validate on the past.
 
-A diferencia del test de leakage (que escribes tú), este es un test mecánico de
-una propiedad estructural: las particiones no se solapan, el embargo existe y
-está vacío de usos, y los folds de ventana expansiva nunca validan con el
-pasado. Aún así: léelo y sé capaz de explicar cada aserción.
-
-No depende de tu config.py real: usa un config sintético duck-typed con los
-mismos atributos (train_end_day, embargo_days, calib_end_day). Tu SplitConfig
-real lo satisface por construcción.
+It does not depend on the real config.py: it uses a duck-typed synthetic config
+with the same attributes (train_end_day, embargo_days, calib_end_day). The real
+SplitConfig satisfies it by construction.
 """
 
 from __future__ import annotations
@@ -24,13 +20,13 @@ from fraudq.data.split import expanding_window_folds, fold_frames, split_by_day
 
 @pytest.fixture
 def cfg():
-    # Mismos valores que design.md §4.1: train 0-119, embargo 10 días, calib hasta 155.
+    # The values of design.md §4: train 0-119, a 10-day embargo, calib to 155.
     return SimpleNamespace(train_end_day=119, embargo_days=10, calib_end_day=155)
 
 
 @pytest.fixture
 def df_days():
-    # Un registro por día, días 0..180, con un id para rastrear filas.
+    # One record per day, days 0 to 180, with an id to trace rows.
     days = list(range(181))
     return pd.DataFrame({"TransactionID": days, "day": days})
 
@@ -39,23 +35,23 @@ def test_partitions_are_disjoint_and_cover(df_days, cfg):
     parts = split_by_day(df_days, cfg)
 
     ids = pd.concat([p["TransactionID"] for p in parts.values()])
-    assert len(ids) == len(df_days), "las particiones no cubren todo el dataset"
-    assert ids.is_unique, "hay filas en más de una partición"
+    assert len(ids) == len(df_days), "the partitions do not cover the whole dataset"
+    assert ids.is_unique, "some rows are in more than one partition"
 
 
 def test_temporal_order_and_embargo(df_days, cfg):
     parts = split_by_day(df_days, cfg)
 
-    # Orden temporal estricto entre particiones.
+    # Strict temporal order between partitions.
     assert parts["train"]["day"].max() < parts["calib"]["day"].min()
     assert parts["calib"]["day"].max() < parts["test"]["day"].min()
 
-    # El embargo existe, tiene exactamente embargo_days días, y separa train de calib.
+    # The embargo exists, spans exactly embargo_days, and separates the two.
     assert len(parts["embargo"]) == cfg.embargo_days
     assert parts["embargo"]["day"].min() == parts["train"]["day"].max() + 1
     assert parts["embargo"]["day"].max() == parts["calib"]["day"].min() - 1
 
-    # Los cortes son los del diseño.
+    # The boundaries are the ones in the design.
     assert parts["train"]["day"].max() == 119
     assert parts["calib"]["day"].min() == 130
     assert parts["calib"]["day"].max() == 155
@@ -69,7 +65,7 @@ def test_incoherent_config_raises(df_days):
 
 
 def test_expanding_window_folds_match_design():
-    # design.md §4.3, literal.
+    # design.md §4.4, literally.
     folds = expanding_window_folds(train_end_day=119, n_folds=4, valid_len=20)
     assert folds == [
         ((0, 39), (40, 59)),
@@ -84,9 +80,9 @@ def test_folds_never_validate_with_the_past(df_days, cfg):
     folds = expanding_window_folds(cfg.train_end_day)
 
     for fit, valid in fold_frames(parts["train"], folds):
-        # El tramo de ajuste termina ESTRICTAMENTE antes de que empiece el de validación.
+        # The fit stretch ends STRICTLY before the validation one begins.
         assert fit["day"].max() < valid["day"].min()
-        # Y todo vive dentro de train: ni embargo, ni calib, ni test.
+        # And all of it lives inside train: no embargo, no calib, no test.
         assert valid["day"].max() <= cfg.train_end_day
 
 

@@ -1,31 +1,19 @@
-"""
-================================================================================
-  ESTE ARCHIVO LO ESCRIBES TÚ.  (plan §5.3 — columna "Escribo yo")
-================================================================================
+"""The leakage test: the executable form of invariant 3 (design.md §9).
 
-El test de leakage es tu **credencial de rigor** y material de entrevista directo
-("¿cómo verificas que tus features no miran el futuro?"). Por eso NO viene resuelto:
-las secciones marcadas `TODO (tú)` son tuyas. Escríbelas, entiéndelas y sé capaz
-de defender cada línea en voz alta.
+## The idea (design.md §5.3)
 
-**Orden (design.md §6, hito H3):** este test se escribe y se commitea *ANTES* que
-`features/build.py`. Es TDD. La primera vez que lo corras contra unas features
-ingenuas **debe fallar** — esa falla es la que te ahorra el proyecto. Solo cuando
-`build.py` calcula todo de forma estrictamente retrospectiva, pasa.
+If a feature is honest, meaning it only looks backwards, computing it over the
+FULL history or over the history TRUNCATED at a time `t` must give EXACTLY the
+same result for every row before `t`. If the two disagree, some feature is
+looking at the present or the future.
 
-Va en: fraud-review-queue/tests/test_no_future_leakage.py
+This test was written and committed BEFORE `features/build.py`. Run against
+naive features it **fails**, and that failure is the one that saves the
+project. It passes only once `build.py` computes everything strictly backwards.
 
---------------------------------------------------------------------------------
-La idea (design.md §6.1)
---------------------------------------------------------------------------------
-Si una feature es honesta (solo mira hacia atrás), calcularla sobre el histórico
-COMPLETO o sobre el histórico TRUNCADO en un tiempo `t` debe dar EXACTAMENTE el
-mismo resultado para todas las filas anteriores a `t`. Si no coinciden, alguna
-feature está mirando el presente o el futuro.
-
-Contrato de `build_features` (ver features/build.py): devuelve un DataFrame
-ordenado por (TransactionDT, TransactionID), índice reseteado, con las columnas
-de identidad más `FEATURE_COLUMNS`.
+The contract of `build_features` (see features/build.py): it returns a
+DataFrame ordered by (TransactionDT, TransactionID) with a reset index, holding
+the identity columns plus `FEATURE_COLUMNS`.
 """
 
 from __future__ import annotations
@@ -36,64 +24,64 @@ from fraudq.features.build import FEATURE_COLUMNS, build_features
 
 
 def test_features_do_not_look_forward(sample_df: pd.DataFrame) -> None:
-    """Feature honesta = invariante ante truncamiento temporal."""
+    """An honest feature is invariant under temporal truncation."""
     cutoff = sample_df["TransactionDT"].quantile(0.6)
 
-    # Features sobre TODO el histórico y sobre el histórico truncado en `cutoff`.
+    # Features over the FULL history and over the history truncated at `cutoff`.
     full = build_features(sample_df)
     truncated = build_features(sample_df[sample_df["TransactionDT"] <= cutoff])
 
-    # `full` está ordenado por (TransactionDT, TransactionID). Nos quedamos con las
-    # filas de `full` anteriores o iguales al corte, para compararlas con `truncated`.
+    # `full` is ordered by (TransactionDT, TransactionID). Keep the rows of
+    # `full` at or before the cut, to compare them against `truncated`.
     full_past = full[full["TransactionDT"] <= cutoff].reset_index(drop=True)
 
-    # Se compara `TransactionID` junto a las features: si el orden se rompiera, la
-    # columna de identidad lo delataría en vez de dejar pasar una comparación de
-    # filas distintas que por azar coincidieran. Ambas tablas vienen ordenadas por
-    # (TransactionDT, TransactionID) con el índice reseteado, así que ya están
-    # alineadas fila a fila.
+    # `TransactionID` is compared alongside the features: if the ordering ever
+    # broke, the identity column would give it away instead of letting through
+    # a comparison of different rows that happened to agree. Both tables come
+    # ordered by (TransactionDT, TransactionID) with a reset index, so they are
+    # already aligned row by row.
     cols = ["TransactionID", *FEATURE_COLUMNS]
 
-    # NULL == NULL cuenta como igualdad, que es justo lo que hace
-    # `assert_frame_equal` con los NaN. Aquí el nulo no es un dato que falte: es el
-    # valor CORRECTO de una feature sin historia previa (la primera transacción de
-    # un uid, o una fila sin uid). Tratarlo como desigual haría fallar al test por
-    # el comportamiento que precisamente exige el contrato.
+    # NULL == NULL counts as equality, which is exactly what
+    # `assert_frame_equal` does with NaN. Here a null is not missing data: it is
+    # the CORRECT value of a feature with no prior history, either a uid's first
+    # transaction or a row with no uid. Treating it as unequal would fail the
+    # test for the very behaviour the contract demands.
     #
-    # `check_dtype=False` porque truncar puede cambiar el tipo inferido de una
-    # columna entera a float en cuanto aparece un nulo, sin que el valor cambie.
+    # `check_dtype=False` because truncating can flip a column's inferred type
+    # from integer to float as soon as a null appears, without any value moving.
     pd.testing.assert_frame_equal(full_past[cols], truncated[cols], check_dtype=False)
 
 
 def test_first_txn_per_uid_has_no_history(sample_df: pd.DataFrame) -> None:
-    """La PRIMERA transacción de cada UID no tiene pasado que mirar.
+    """The FIRST transaction of each UID has no past to look at.
 
-    Un segundo guardia, más fino: si una feature retrospectiva tuviera historia en
-    la primera transacción de un UID, estaría inventando pasado (o mirando la fila
-    actual). Esperado: `uid_txn_count_prior == 0`, y las medias/ratios/z-score son
-    NULL (NaN) en esa primera fila.
+    A second, finer guard: if a backward-looking feature had history on a UID's
+    first transaction, it would be inventing a past, or looking at the current
+    row. Expected: `uid_txn_count_prior == 0`, and the means, ratios and
+    z-score are NULL on that first row.
     """
     feats = build_features(sample_df)
     first_per_uid = feats.sort_values(["TransactionDT", "TransactionID"]).groupby("uid").head(1)
 
-    assert not first_per_uid.empty, "la fixture debe traer al menos un uid"
+    assert not first_per_uid.empty, "the fixture must carry at least one uid"
 
-    # Contar hacia atrás desde la primera transacción da cero, no nulo: hay una
-    # respuesta y es "ninguna". Un NaN aquí escondería la diferencia entre
-    # "no tiene pasado" y "no se pudo calcular".
+    # Counting backwards from the first transaction gives zero, not null: there
+    # is an answer and it is "none". A NaN here would hide the difference
+    # between "has no past" and "could not be computed".
     assert (first_per_uid["uid_txn_count_prior"] == 0).all()
 
-    # Las agregaciones sobre un conjunto vacío sí son NULL: no existe la media de
-    # cero montos, ni el cociente contra ella.
+    # Aggregations over an empty set are NULL: there is no mean of zero
+    # amounts, nor any ratio against it.
     assert first_per_uid["uid_amt_prior_mean"].isna().all()
     assert first_per_uid["uid_amt_ratio"].isna().all()
 
-    # `uid_seconds_since_last` viene de LAG sobre la partición del uid: en la
-    # primera fila no hay anterior, así que NULL. Un 0 sería peor que inútil,
-    # afirmaría que la transacción previa ocurrió en el mismo instante.
+    # `uid_seconds_since_last` comes from LAG over the uid partition: on the
+    # first row there is no previous one, so NULL. A 0 would be worse than
+    # useless, asserting that the previous transaction happened at that instant.
     assert first_per_uid["uid_seconds_since_last"].isna().all()
 
-    # `uid_amt_zscore` divide por STDDEV_SAMP del histórico previo, que necesita
-    # dos observaciones: NULL en la primera transacción y también en la segunda.
-    # Está documentado en build.py y es correcto, no un defecto.
+    # `uid_amt_zscore` divides by STDDEV_SAMP of the prior history, which needs
+    # two observations: NULL on the first transaction and on the second too.
+    # That is documented in build.py, and is correct rather than a defect.
     assert first_per_uid["uid_amt_zscore"].isna().all()
