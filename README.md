@@ -2,8 +2,10 @@
 
 **Cost-optimal allocation of a capacity-constrained fraud review queue.**
 
-> **Status: in progress (July 2026).** The design is fixed and the specification
-> is complete; results are being produced. Full spec in `docs/design.md`.
+> **Status: results measured (August 2026).** The design is fixed, the pipeline
+> runs end to end on the real data, and the numbers below come from a single
+> scoring of the held-out test partition. The sensitivity sweep is next.
+> Full spec in `docs/design.md`.
 
 ---
 
@@ -82,23 +84,43 @@ row inside the truncation. Honest features cannot tell the difference.
 
 ## Results
 
-*Held-out test partition (days 156+). Evaluated once. In progress.*
+*Held-out test partition: days 156 to 182, 75,190 transactions, 2,655 of them
+fraudulent. Scored once. Review capacity is 1 % of each day's volume, which on
+this partition is 737 reviews per day.*
 
 | Policy | Expected loss / $1k volume | Fraud caught | Fraud missed | Legit blocked |
 |---|---|---|---|---|
-| Approve everything | — | — | — | — |
-| Single score threshold | — | — | — | — |
-| Review top-K by score | — | — | — | — |
-| **Review top-K by value** | — | — | — | — |
+| Approve everything | $44.48 | 0 | 2,655 | 0 |
+| Single score threshold | $32.36 | 1,250 | 1,405 | 1,067 |
+| Review top-K by score | $32.21 | 1,271 | 1,384 | 1,012 |
+| **Review top-K by value** | **$22.65** | **1,343** | **1,312** | **939** |
+
+**Ranking the queue by value rather than by score saves $9.56 per $1,000 of
+volume: a 29.7 % reduction in expected loss.** Both queue policies spend the
+same 737 reviews a day and both run at full utilisation, so the gap is not extra
+capacity. It is the same capacity aimed at different transactions. Ranking by
+value also catches more fraud (1,343 against 1,271) while blocking fewer
+legitimate customers (939 against 1,012), which is the part a pure
+classification metric cannot see.
+
+Note that the single threshold and the score-ranked queue are nearly tied
+($32.36 against $32.21). Adding a capacity-constrained queue on top of a
+threshold buys almost nothing if the queue is filled by score. What pays is the
+ranking quantity.
 
 ### Model
 
 | Metric | Value |
 |---|---|
-| PR-AUC | — |
-| ROC-AUC | — |
-| Brier score (calibrated) | — |
-| ECE (calibrated) | — |
+| PR-AUC | 0.526 |
+| ROC-AUC | 0.903 |
+| Brier score (calibrated) | 0.0229 |
+| ECE (calibrated) | 0.0029 |
+
+Platt scaling won on the temporal holdout inside the calibration partition
+(Brier 0.01825, against 0.01833 uncalibrated and 0.01853 isotonic). Cross
+validation inside the training window gave a mean PR-AUC of 0.628 across four
+expanding-window folds.
 
 ---
 

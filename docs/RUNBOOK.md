@@ -38,10 +38,12 @@ Detection](https://www.kaggle.com/c/ieee-fraud-detection). Three prerequisites,
 and the third is the one people forget:
 
 1. A Kaggle account.
-2. An API token: Kaggle → Settings → API → *Create New Token*. It downloads
-   `kaggle.json`, which goes to `~/.kaggle/kaggle.json` with `chmod 600`.
-   `KAGGLE_USERNAME` and `KAGGLE_KEY` work instead if you prefer not to keep the
-   file on disk.
+2. An API token, from <https://www.kaggle.com/settings/api>. The site hands you
+   a bare token and tells you to save it at `~/.kaggle/access_token` with
+   `chmod 600`; that is the first place the CLI looks. The older
+   `~/.kaggle/kaggle.json` still works, and so do the `KAGGLE_API_TOKEN` and
+   `KAGGLE_USERNAME` plus `KAGGLE_KEY` environment variables if you would
+   rather keep nothing on disk.
 3. **Accepting the competition rules once, on the web**:
    <https://www.kaggle.com/c/ieee-fraud-detection/rules>. Without this the API
    returns a 403 that does not explain itself.
@@ -78,9 +80,14 @@ Stages, in order, and what each leaves behind:
 | Policy comparison | `reports/policy_comparison.csv` |
 | Booster, calibrator, feature list, cost config | `models/artifacts/` |
 
-Runtime and peak memory on the real dataset have not been measured yet. Check
-free memory before starting: the training frame is ~590k rows by ~400 columns,
-and swapping mid-training is not slow, it is fatal.
+Measured on 4 cores with 7.5 GiB of RAM: **14.6 minutes wall clock and a peak
+resident set of 6.56 GiB**, on a training frame of 410,601 rows by 412 features.
+The ingest step before it takes 41 seconds and peaks at 1.8 GiB.
+
+That peak is the number to plan around. On a 7.5 GiB machine it fits only
+because the kernel pushes about 3 GiB into swap during the feature stage, and it
+recovers; on anything smaller, swapping mid-training is not slow, it is fatal.
+Check free memory before starting.
 
 ## 4. Everything downstream reads the persisted scoring
 
