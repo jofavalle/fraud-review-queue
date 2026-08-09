@@ -7,8 +7,9 @@
 #
 # Requisitos:
 #   - Kaggle CLI:  uv pip install kaggle   (o pipx install kaggle)
-#   - Credenciales en ~/.kaggle/kaggle.json (chmod 600), o las variables
-#     de entorno KAGGLE_USERNAME y KAGGLE_KEY.
+#   - Credenciales, en cualquiera de sus cuatro formas: el token de acceso en
+#     ~/.kaggle/access_token (chmod 600), la variable KAGGLE_API_TOKEN, el
+#     ~/.kaggle/kaggle.json de siempre, o KAGGLE_USERNAME y KAGGLE_KEY.
 #   - Haber aceptado las reglas de la competencia una vez en la web:
 #     https://www.kaggle.com/c/ieee-fraud-detection/rules
 #
@@ -28,9 +29,20 @@ if ! command -v kaggle >/dev/null 2>&1; then
   exit 1
 fi
 
-if [[ ! -f "${HOME}/.kaggle/kaggle.json" && ( -z "${KAGGLE_USERNAME:-}" || -z "${KAGGLE_KEY:-}" ) ]]; then
-  echo "ERROR: sin credenciales de Kaggle." >&2
-  echo "  Coloca ~/.kaggle/kaggle.json (chmod 600) o exporta KAGGLE_USERNAME y KAGGLE_KEY." >&2
+# Kaggle admite dos métodos, y la CLI prueba primero el del token de acceso
+# (kagglesdk/kaggle_env.py, get_access_token_from_env). Comprobar solo el
+# kaggle.json rechazaba credenciales perfectamente válidas.
+if [[ ! -f "${HOME}/.kaggle/access_token" \
+   && ! -f "${HOME}/.kaggle/access_token.txt" \
+   && -z "${KAGGLE_API_TOKEN:-}" \
+   && ! -f "${HOME}/.kaggle/kaggle.json" \
+   && ( -z "${KAGGLE_USERNAME:-}" || -z "${KAGGLE_KEY:-}" ) ]]; then
+  echo "ERROR: sin credenciales de Kaggle. Vale cualquiera de estas:" >&2
+  echo "  - Token de acceso en ~/.kaggle/access_token (chmod 600), que es lo que" >&2
+  echo "    entrega hoy https://www.kaggle.com/settings/api" >&2
+  echo "  - La variable KAGGLE_API_TOKEN, con el token o con la ruta a un archivo" >&2
+  echo "  - El clásico ~/.kaggle/kaggle.json (chmod 600)" >&2
+  echo "  - Las variables KAGGLE_USERNAME y KAGGLE_KEY" >&2
   exit 1
 fi
 
