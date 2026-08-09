@@ -1,4 +1,4 @@
-# El contexto de build NO incluye los datos (1.4 GB) ni artefactos locales.
+# The build context includes neither the data (1.4 GB) nor local artefacts.
 data/
 models/
 reports/
