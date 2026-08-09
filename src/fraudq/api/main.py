@@ -58,6 +58,7 @@ class Scorer:
     @classmethod
     def from_dir(cls, dir_path) -> "Scorer":
         from fraudq.models.persist import load_artifacts
+
         return cls(*load_artifacts(dir_path))
 
     def predict_p(self, payload: dict) -> float:

@@ -35,8 +35,13 @@ import numpy as np
 import pandas as pd
 
 # Parámetros que rompen la calibración de probabilidades. Prohibidos por diseño.
-_FORBIDDEN_PARAMS = ("scale_pos_weight", "is_unbalance", "class_weight",
-                     "pos_bagging_fraction", "neg_bagging_fraction")
+_FORBIDDEN_PARAMS = (
+    "scale_pos_weight",
+    "is_unbalance",
+    "class_weight",
+    "pos_bagging_fraction",
+    "neg_bagging_fraction",
+)
 
 
 def _validate_params(params: dict) -> None:
@@ -57,7 +62,8 @@ def _validate_params(params: dict) -> None:
 @dataclass
 class CVResult:
     """Resultado de la validación cruzada de ventana expansiva."""
-    fold_ap: list[float] = field(default_factory=list)   # PR-AUC (AP) por fold
+
+    fold_ap: list[float] = field(default_factory=list)  # PR-AUC (AP) por fold
     best_iters: list[int] = field(default_factory=list)  # mejor iteración por fold
 
     @property
@@ -67,8 +73,10 @@ class CVResult:
 
     def summary(self) -> str:
         aps = ", ".join(f"{a:.4f}" for a in self.fold_ap)
-        return (f"PR-AUC por fold: [{aps}] | media={np.mean(self.fold_ap):.4f} "
-                f"| n_estimators (mediana)={self.n_estimators}")
+        return (
+            f"PR-AUC por fold: [{aps}] | media={np.mean(self.fold_ap):.4f} "
+            f"| n_estimators (mediana)={self.n_estimators}"
+        )
 
 
 def cv_lightgbm(
@@ -102,8 +110,7 @@ def cv_lightgbm(
         dvalid = lgb.Dataset(valid[feature_cols], label=valid[target], reference=dtrain)
 
         booster = lgb.train(
-            {**params, "objective": "binary", "metric": "average_precision",
-             "verbosity": -1},
+            {**params, "objective": "binary", "metric": "average_precision", "verbosity": -1},
             dtrain,
             num_boost_round=num_boost_round,
             valid_sets=[dvalid],
@@ -158,17 +165,19 @@ def train_logistic_baseline(
     from sklearn.pipeline import Pipeline
     from sklearn.preprocessing import StandardScaler
 
-    pipe = Pipeline([
-        ("imputer", SimpleImputer(strategy="median")),
-        ("scaler", StandardScaler()),
-        ("clf", LogisticRegression(max_iter=2000, class_weight=None)),
-    ])
+    pipe = Pipeline(
+        [
+            ("imputer", SimpleImputer(strategy="median")),
+            ("scaler", StandardScaler()),
+            ("clf", LogisticRegression(max_iter=2000, class_weight=None)),
+        ]
+    )
     pipe.fit(df_train[feature_cols], df_train[target])
     return pipe
 
 
 def predict_scores(model, df: pd.DataFrame, feature_cols: list[str]) -> np.ndarray:
     """Scores en [0,1] con interfaz uniforme para ambos modelos."""
-    if hasattr(model, "predict_proba"):          # sklearn Pipeline
+    if hasattr(model, "predict_proba"):  # sklearn Pipeline
         return model.predict_proba(df[feature_cols])[:, 1]
-    return model.predict(df[feature_cols])       # lgb.Booster
+    return model.predict(df[feature_cols])  # lgb.Booster

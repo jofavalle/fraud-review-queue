@@ -45,6 +45,7 @@ POLICY_ORDER = ("approve_all", "single_threshold", "topk_by_score", "topk_by_val
 
 # ------------------------------------------------------------- las políticas
 
+
 def actions_approve_all(p, amt, capacity, cfg) -> np.ndarray:
     """Política 1: aprobar todo. La pérdida basal contra la que todo se mide."""
     return np.full(len(np.asarray(p)), "approve", dtype=object)
@@ -56,6 +57,7 @@ def make_actions_single_threshold(threshold: float):
     Es el "sistema de un solo umbral sobre el score" del §2.4 — la política
     estructuralmente equivocada porque el umbral óptimo depende del monto.
     """
+
     def actions_single_threshold(p, amt, capacity, cfg) -> np.ndarray:
         p = np.asarray(p, dtype=float)
         return np.where(p >= threshold, "block", "approve").astype(object)
@@ -73,7 +75,7 @@ def actions_topk_by_score(p, amt, capacity, cfg) -> np.ndarray:
     """
     p = np.asarray(p, dtype=float)
     amt = np.asarray(amt, dtype=float)
-    order = np.argsort(-p, kind="stable")          # determinista ante empates
+    order = np.argsort(-p, kind="stable")  # determinista ante empates
     to_review = order[: max(int(capacity), 0)]
 
     approve_cheaper = cost_approve(p, amt, cfg) <= cost_block(p, amt, cfg)
@@ -88,6 +90,7 @@ def actions_topk_by_value(p, amt, capacity, cfg) -> np.ndarray:
 
 
 # ------------------------------------------- ajuste del umbral (en CALIB)
+
 
 def fit_single_threshold(
     df_calib: pd.DataFrame,
@@ -119,6 +122,7 @@ def fit_single_threshold(
 
 # --------------------------------------------------------- la comparación
 
+
 def compare_policies(
     df: pd.DataFrame,
     cfg,
@@ -143,8 +147,14 @@ def compare_policies(
     rows = {}
     for name in POLICY_ORDER:
         result: QueueResult = simulate_queue(
-            df, policies[name], cfg, capacity_pct,
-            p_col=p_col, amt_col=amt_col, day_col=day_col, target=target,
+            df,
+            policies[name],
+            cfg,
+            capacity_pct,
+            p_col=p_col,
+            amt_col=amt_col,
+            day_col=day_col,
+            target=target,
         )
         rows[name] = result.summary()
 

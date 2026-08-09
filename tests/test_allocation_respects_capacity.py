@@ -25,12 +25,13 @@ CFG = SimpleNamespace(F=20.0, m=0.25, phi=10.0, r=2.0)
 
 def _rng_case(n: int = 500, seed: int = 11):
     rng = np.random.default_rng(seed)
-    p = rng.beta(0.5, 6.0, size=n)               # mayoría de p bajas, cola alta
-    amt = np.exp(rng.normal(3.5, 1.2, size=n))   # montos log-normales
+    p = rng.beta(0.5, 6.0, size=n)  # mayoría de p bajas, cola alta
+    amt = np.exp(rng.normal(3.5, 1.2, size=n))  # montos log-normales
     return p, amt
 
 
 # ----------------------------------------------------------------- la tesis
+
 
 def test_thesis_in_one_case():
     """Capacidad 1: el score alto NO se revisa; el ambiguo de monto alto SÍ.
@@ -46,10 +47,11 @@ def test_thesis_in_one_case():
     amt = np.array([50.0, 200.0])
     actions = allocate_day(p, amt, capacity=1, cfg=CFG)
     assert actions[1] == "review"
-    assert actions[0] == "block"      # su acción automática más barata
+    assert actions[0] == "block"  # su acción automática más barata
 
 
 # ------------------------------------------------------------- el contrato
+
 
 def test_output_contract():
     p, amt = _rng_case()
@@ -89,7 +91,7 @@ def test_spare_capacity_is_not_wasted_on_nonpositive_value():
     # Todos los casos claros: p altísima o bajísima con montos bajos.
     p = np.array([0.99, 0.995, 0.001, 0.002])
     amt = np.array([10.0, 15.0, 20.0, 25.0])
-    assert np.all(value_of_review(p, amt, CFG) <= 0)   # premisa del caso
+    assert np.all(value_of_review(p, amt, CFG) <= 0)  # premisa del caso
     actions = np.asarray(allocate_day(p, amt, capacity=10, cfg=CFG))
     assert (actions == "review").sum() == 0
 
@@ -100,7 +102,7 @@ def test_non_reviewed_get_the_cheaper_auto_action():
     approve_cost = cost_approve(p, amt, CFG)
     block_cost = cost_block(p, amt, CFG)
     for i in np.flatnonzero(actions != "review"):
-        if approve_cost[i] <= block_cost[i]:      # empate -> approve (contrato)
+        if approve_cost[i] <= block_cost[i]:  # empate -> approve (contrato)
             assert actions[i] == "approve"
         else:
             assert actions[i] == "block"

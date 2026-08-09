@@ -65,6 +65,7 @@ def add_uid(df: pd.DataFrame) -> pd.DataFrame:
         )
 
     out = df.copy()
+
     # round() antes de Int64: estas columnas llegan como float (nullable: los
     # nulos fuerzan float64 en pandas) y el casteo directo falla o es inseguro
     # ante artefactos de coma flotante. Sin la normalizacion, addr1=50.0 daria
@@ -74,10 +75,6 @@ def add_uid(df: pd.DataFrame) -> pd.DataFrame:
 
     out["D1n"] = (out["day"] - out["D1"]).round().astype("Int64")
     out["uid"] = (
-        _int_str(out["card1"])
-        + "_"
-        + _int_str(out["addr1"])
-        + "_"
-        + out["D1n"].astype("string")
+        _int_str(out["card1"]) + "_" + _int_str(out["addr1"]) + "_" + out["D1n"].astype("string")
     )
     return out

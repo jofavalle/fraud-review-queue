@@ -68,9 +68,7 @@ def ingest(raw_dir: Path, out_dir: Path) -> None:
     idy_csv = raw_dir / "train_identity.csv"
     for f in (txn_csv, idy_csv):
         if not f.exists():
-            raise FileNotFoundError(
-                f"No encuentro {f}. Corre scripts/download_data.sh primero."
-            )
+            raise FileNotFoundError(f"No encuentro {f}. Corre scripts/download_data.sh primero.")
 
     txn_pq = out_dir / "transactions.parquet"
     idy_pq = out_dir / "identity.parquet"
@@ -91,9 +89,9 @@ def ingest(raw_dir: Path, out_dir: Path) -> None:
             FROM read_parquet('{txn_pq.as_posix()}')
             """
         ).fetchone()
-        n_idy = con.execute(
-            f"SELECT COUNT(*) FROM read_parquet('{idy_pq.as_posix()}')"
-        ).fetchone()[0]
+        n_idy = con.execute(f"SELECT COUNT(*) FROM read_parquet('{idy_pq.as_posix()}')").fetchone()[
+            0
+        ]
     finally:
         con.close()
 

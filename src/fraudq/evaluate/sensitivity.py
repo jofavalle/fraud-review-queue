@@ -99,15 +99,17 @@ def tornado_data(base_cfg, ranges: dict, evaluate_fn) -> pd.DataFrame:
     # Descendente: el tornado se lee de arriba hacia abajo, y la barra más larga
     # es el parámetro que el negocio debería medir mejor.
     return (
-        pd.DataFrame(rows, columns=["param", "low", "high", "savings_at_low",
-                                    "savings_at_high", "swing"])
+        pd.DataFrame(
+            rows, columns=["param", "low", "high", "savings_at_low", "savings_at_high", "swing"]
+        )
         .sort_values("swing", ascending=False)
         .reset_index(drop=True)
     )
 
 
-def sensitivity_grid_2d(base_cfg, param_x: str, values_x, param_y: str,
-                        values_y, evaluate_fn) -> pd.DataFrame:
+def sensitivity_grid_2d(
+    base_cfg, param_x: str, values_x, param_y: str, values_y, evaluate_fn
+) -> pd.DataFrame:
     """[OPCIONAL, §8.3 extensión] Malla 2D: ahorro en función de dos parámetros.
 
     Devuelve un DataFrame largo (param_x, param_y, savings_per_1k) listo para
@@ -128,8 +130,9 @@ def sensitivity_grid_2d(base_cfg, param_x: str, values_x, param_y: str,
     return pd.DataFrame(rows, columns=[param_x, param_y, "savings_per_1k"])
 
 
-def plot_tornado(tornado_df: pd.DataFrame, base_savings: float, ax=None,
-                 param_labels: dict | None = None):
+def plot_tornado(
+    tornado_df: pd.DataFrame, base_savings: float, ax=None, param_labels: dict | None = None
+):
     """El tornado plot (delegable: es una figura). Barras horizontales.
 
     Cada barra va de `savings_at_low` a `savings_at_high`, ordenadas por
@@ -145,11 +148,8 @@ def plot_tornado(tornado_df: pd.DataFrame, base_savings: float, ax=None,
     if ax is None:
         _, ax = plt.subplots(figsize=(8, 0.6 * len(tornado_df) + 1.5))
 
-    df = tornado_df.iloc[::-1]                      # la de mayor swing arriba
-    labels = [
-        (param_labels or {}).get(row["param"], row["param"])
-        for _, row in df.iterrows()
-    ]
+    df = tornado_df.iloc[::-1]  # la de mayor swing arriba
+    labels = [(param_labels or {}).get(row["param"], row["param"]) for _, row in df.iterrows()]
     lo = df[["savings_at_low", "savings_at_high"]].min(axis=1)
     hi = df[["savings_at_low", "savings_at_high"]].max(axis=1)
 

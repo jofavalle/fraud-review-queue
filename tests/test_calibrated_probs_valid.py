@@ -39,6 +39,7 @@ from fraudq.models.calibrate import fit_isotonic, fit_platt  # noqa: E402
 # misma información, escala distorsionada — la firma de un modelo sin calibrar.
 # ---------------------------------------------------------------------------
 
+
 def _sigmoid(z):
     return 1.0 / (1.0 + np.exp(-z))
 
@@ -46,7 +47,7 @@ def _sigmoid(z):
 @pytest.fixture(scope="module")
 def miscalibrated():
     rng = np.random.default_rng(42)
-    z = rng.normal(-2.0, 1.5, size=6000)     # mayoría de casos "legítimos"
+    z = rng.normal(-2.0, 1.5, size=6000)  # mayoría de casos "legítimos"
     p_true = _sigmoid(z)
     y = (rng.random(6000) < p_true).astype(int)
     scores = _sigmoid(2.5 * z + 1.0)
@@ -58,6 +59,7 @@ def miscalibrated():
 
 
 # ------------------------------------------------------------------ contrato
+
 
 def test_probabilities_live_in_unit_interval(miscalibrated):
     s_fit, y_fit = miscalibrated["fit"]
@@ -96,6 +98,7 @@ def test_calibration_improves_brier_out_of_sample(miscalibrated):
 
 
 # ------------------------------------------- métricas: casos hechos a mano
+
 
 def test_brier_hand_cases():
     assert brier_score([0, 1], [0.0, 1.0]) == 0.0

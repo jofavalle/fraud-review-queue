@@ -71,8 +71,7 @@ class IsotonicCalibrator:
     _iso: object
 
     def predict(self, scores) -> np.ndarray:
-        return np.asarray(self._iso.predict(np.asarray(scores, dtype=float)),
-                          dtype=float)
+        return np.asarray(self._iso.predict(np.asarray(scores, dtype=float)), dtype=float)
 
 
 def fit_platt(scores, y) -> PlattCalibrator:
@@ -103,8 +102,7 @@ def fit_isotonic(scores, y) -> IsotonicCalibrator:
     """Regresión isotónica creciente, acotada a [0,1], clip fuera de rango."""
     from sklearn.isotonic import IsotonicRegression
 
-    iso = IsotonicRegression(y_min=0.0, y_max=1.0, increasing=True,
-                             out_of_bounds="clip")
+    iso = IsotonicRegression(y_min=0.0, y_max=1.0, increasing=True, out_of_bounds="clip")
     iso.fit(np.asarray(scores, dtype=float), np.asarray(y, dtype=float))
     return IsotonicCalibrator(_iso=iso)
 
@@ -139,14 +137,11 @@ def evaluate_calibrator(calibrator, scores, y_true, n_bins: int = 10) -> dict:
     """Brier y ECE de un calibrador sobre (scores, y). `None` = score crudo."""
     from fraudq.evaluate.metrics import brier_score, ece
 
-    p = np.asarray(scores, dtype=float) if calibrator is None \
-        else calibrator.predict(scores)
+    p = np.asarray(scores, dtype=float) if calibrator is None else calibrator.predict(scores)
     return {"brier": brier_score(y_true, p), "ece": ece(y_true, p, n_bins=n_bins)}
 
 
-def compare_calibrators(
-    fit_scores, fit_y, eval_scores, eval_y, n_bins: int = 10
-) -> pd.DataFrame:
+def compare_calibrators(fit_scores, fit_y, eval_scores, eval_y, n_bins: int = 10) -> pd.DataFrame:
     """Tabla raw / platt / isotonic con Brier y ECE sobre el conjunto de eval.
 
     `raw` es la fila "antes" de la curva antes/después del README (§7.2): la
@@ -157,9 +152,11 @@ def compare_calibrators(
         "platt": fit_platt(fit_scores, fit_y),
         "isotonic": fit_isotonic(fit_scores, fit_y),
     }
-    table = pd.DataFrame({
-        name: evaluate_calibrator(cal, eval_scores, eval_y, n_bins=n_bins)
-        for name, cal in rows.items()
-    }).T
+    table = pd.DataFrame(
+        {
+            name: evaluate_calibrator(cal, eval_scores, eval_y, n_bins=n_bins)
+            for name, cal in rows.items()
+        }
+    ).T
     table.index.name = "calibrator"
     return table

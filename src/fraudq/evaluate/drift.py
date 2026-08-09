@@ -53,7 +53,7 @@ def psi(expected, actual, n_bins: int = 10) -> float:
 
     # Cuantiles de la referencia; edges únicos (features discretas colapsan bins).
     edges = np.unique(np.quantile(expected, np.linspace(0, 1, n_bins + 1)))
-    if len(edges) < 3:          # feature ~constante: no hay distribución que comparar
+    if len(edges) < 3:  # feature ~constante: no hay distribución que comparar
         return 0.0
     edges[0], edges[-1] = -np.inf, np.inf
 
@@ -64,8 +64,9 @@ def psi(expected, actual, n_bins: int = 10) -> float:
     return float(np.sum((a_prop - e_prop) * np.log(a_prop / e_prop)))
 
 
-def add_relative_month(df: pd.DataFrame, day_col: str = "day",
-                       days_per_month: int = 30) -> pd.DataFrame:
+def add_relative_month(
+    df: pd.DataFrame, day_col: str = "day", days_per_month: int = 30
+) -> pd.DataFrame:
     """Copia de `df` con la columna `month`: bloques de 30 días desde SU inicio."""
     out = df.copy()
     out["month"] = (out[day_col] - out[day_col].min()) // days_per_month
@@ -86,8 +87,7 @@ def psi_by_month(
     test se compara contra ella. Devuelve un DataFrame ancho: filas = mes,
     columnas = features, valores = PSI. Ideal para un heatmap en el notebook.
     """
-    missing = [c for c in features if c not in df_reference.columns
-               or c not in df_current.columns]
+    missing = [c for c in features if c not in df_reference.columns or c not in df_current.columns]
     if missing:
         raise KeyError(f"Features ausentes en referencia o actual: {missing}.")
 
@@ -95,8 +95,7 @@ def psi_by_month(
     rows = {}
     for month, g in current.groupby("month", sort=True):
         rows[int(month)] = {
-            f: psi(df_reference[f].to_numpy(), g[f].to_numpy(), n_bins=n_bins)
-            for f in features
+            f: psi(df_reference[f].to_numpy(), g[f].to_numpy(), n_bins=n_bins) for f in features
         }
     out = pd.DataFrame(rows).T
     out.index.name = "month"
@@ -123,11 +122,14 @@ def performance_by_month(
     rows = []
     for month, g in monthly.groupby("month", sort=True):
         y = g[target].to_numpy()
-        rows.append({
-            "month": int(month),
-            "n": len(g),
-            "fraud_rate": float(y.mean()),
-            "pr_auc": float(average_precision_score(y, g[p_col].to_numpy()))
-            if 0 < y.sum() < len(g) else float("nan"),
-        })
+        rows.append(
+            {
+                "month": int(month),
+                "n": len(g),
+                "fraud_rate": float(y.mean()),
+                "pr_auc": float(average_precision_score(y, g[p_col].to_numpy()))
+                if 0 < y.sum() < len(g)
+                else float("nan"),
+            }
+        )
     return pd.DataFrame(rows)

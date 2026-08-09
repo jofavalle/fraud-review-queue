@@ -48,8 +48,8 @@ def daily_capacity(n_transactions: int, capacity_pct: float) -> int:
 class QueueResult:
     """Resultado de simular una política sobre una partición completa."""
 
-    actions: pd.Series          # acción por transacción, alineada al df de entrada
-    per_day: pd.DataFrame       # una fila por día: costos, conteos, capacidad
+    actions: pd.Series  # acción por transacción, alineada al df de entrada
+    per_day: pd.DataFrame  # una fila por día: costos, conteos, capacidad
 
     # ------------------------------------------------------------- agregados
     @property
@@ -157,19 +157,21 @@ def simulate_queue(
         blocked = actions == "block"
         approved = actions == "approve"
 
-        day_rows.append({
-            "day": day_value,
-            "n": len(g),
-            "capacity": capacity,
-            "reviews": int(reviewed.sum()),
-            "cost": float(costs.sum()),
-            "volume": float(amt.sum()),
-            # la revisión resuelve el caso correctamente (§2.2): un fraude
-            # revisado cuenta como atrapado.
-            "frauds_caught": int(((blocked | reviewed) & is_fraud).sum()),
-            "frauds_missed": int((approved & is_fraud).sum()),
-            "legit_blocked": int((blocked & ~is_fraud).sum()),
-        })
+        day_rows.append(
+            {
+                "day": day_value,
+                "n": len(g),
+                "capacity": capacity,
+                "reviews": int(reviewed.sum()),
+                "cost": float(costs.sum()),
+                "volume": float(amt.sum()),
+                # la revisión resuelve el caso correctamente (§2.2): un fraude
+                # revisado cuenta como atrapado.
+                "frauds_caught": int(((blocked | reviewed) & is_fraud).sum()),
+                "frauds_missed": int((approved & is_fraud).sum()),
+                "legit_blocked": int((blocked & ~is_fraud).sum()),
+            }
+        )
         actions_all.loc[g.index] = actions
 
     return QueueResult(actions=actions_all, per_day=pd.DataFrame(day_rows))

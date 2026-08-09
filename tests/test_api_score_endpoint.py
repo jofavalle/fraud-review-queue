@@ -41,6 +41,7 @@ def client_with(monkeypatch):
     def _make(p: float | None) -> TestClient:
         app.state.scorer = None if p is None else StubScorer(p)
         return TestClient(app)
+
     yield _make
     app.state.scorer = None
 
@@ -54,8 +55,7 @@ def test_score_returns_200_with_valid_schema(client_with):
     resp = client_with(0.25).post("/score", json={"TransactionAmt": 200.0})
     assert resp.status_code == 200
     body = resp.json()
-    assert set(body) == {"probability", "value_of_review",
-                         "recommended_action", "queue_position"}
+    assert set(body) == {"probability", "value_of_review", "recommended_action", "queue_position"}
     assert body["probability"] == pytest.approx(0.25)
     assert body["value_of_review"] == pytest.approx(43.0)
     assert body["recommended_action"] == "review"
@@ -64,34 +64,33 @@ def test_score_returns_200_with_valid_schema(client_with):
 
 def test_certain_low_probability_gets_approved(client_with):
     """p=0.001, amt=20: approve = 0.001·40 = 0.04; block ≈ 14.985; V < 0 -> approve."""
-    body = client_with(0.001).post(
-        "/score", json={"TransactionAmt": 20.0}
-    ).json()
+    body = client_with(0.001).post("/score", json={"TransactionAmt": 20.0}).json()
     assert body["recommended_action"] == "approve"
     assert body["value_of_review"] < 0
 
 
 def test_certain_high_probability_gets_blocked(client_with):
     """p=0.99, amt=10: block = 0.01·12.5 = 0.125; V = -1.875 -> block."""
-    body = client_with(0.99).post(
-        "/score", json={"TransactionAmt": 10.0}
-    ).json()
+    body = client_with(0.99).post("/score", json={"TransactionAmt": 10.0}).json()
     assert body["recommended_action"] == "block"
 
 
 def test_extra_fields_are_accepted(client_with):
     """El payload real trae card1, C1..., uid_*: extra='allow' los deja fluir."""
-    resp = client_with(0.25).post("/score", json={
-        "TransactionAmt": 80.0, "card1": 1000, "P_emaildomain": "gmail.com",
-        "uid_txn_count_prior": 3,
-    })
+    resp = client_with(0.25).post(
+        "/score",
+        json={
+            "TransactionAmt": 80.0,
+            "card1": 1000,
+            "P_emaildomain": "gmail.com",
+            "uid_txn_count_prior": 3,
+        },
+    )
     assert resp.status_code == 200
 
 
 def test_invalid_amount_is_rejected(client_with):
-    assert client_with(0.25).post(
-        "/score", json={"TransactionAmt": -5.0}
-    ).status_code == 422
+    assert client_with(0.25).post("/score", json={"TransactionAmt": -5.0}).status_code == 422
     assert client_with(0.25).post("/score", json={}).status_code == 422
 
 

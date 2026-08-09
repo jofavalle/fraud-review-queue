@@ -41,8 +41,7 @@ def _boundaries(cfg) -> tuple[int, int, int, int]:
             f"SplitConfig sin atributos {missing}; ver design.md §9.1 / config.py."
         )
     train_end = int(cfg.train_end_day)
-    calib_start = int(getattr(cfg, "calib_start_day",
-                              train_end + int(cfg.embargo_days) + 1))
+    calib_start = int(getattr(cfg, "calib_start_day", train_end + int(cfg.embargo_days) + 1))
     calib_end = int(cfg.calib_end_day)
     test_start = int(getattr(cfg, "test_start_day", calib_end + 1))
 
@@ -75,17 +74,15 @@ def split_by_day(df: pd.DataFrame, cfg, day_col: str = "day") -> dict[str, pd.Da
     day = df[day_col]
 
     parts = {
-        "train":   df[day <= train_end],
+        "train": df[day <= train_end],
         "embargo": df[(day > train_end) & (day < calib_start)],
-        "calib":   df[(day >= calib_start) & (day <= calib_end)],
-        "test":    df[day >= test_start],
+        "calib": df[(day >= calib_start) & (day <= calib_end)],
+        "test": df[day >= test_start],
     }
 
     total = sum(len(p) for p in parts.values())
     if total != len(df):
-        raise AssertionError(
-            f"Las particiones no cubren el dataset: {total} != {len(df)}."
-        )
+        raise AssertionError(f"Las particiones no cubren el dataset: {total} != {len(df)}.")
     return {k: v.reset_index(drop=True) for k, v in parts.items()}
 
 

@@ -36,7 +36,7 @@ def _row(txn_id: int, dt: int, card1: int, addr1: int, d1n: int, amt: float, fra
         "addr1": addr1,
         "D1": day - d1n,
         "TransactionAmt": amt,
-        "isFraud": fraud,   # presente pero las features NUNCA deben usarlo
+        "isFraud": fraud,  # presente pero las features NUNCA deben usarlo
     }
 
 
@@ -46,11 +46,10 @@ def sample_df() -> pd.DataFrame:
     # TransactionDT (empate deliberado) para probar el determinismo.
     # Cliente B: card1=2000, addr1=60, D1n=8. Tres transacciones.
     rows = [
-        _row(1, 1 * SECONDS_PER_DAY + 100, 1000, 50, 5,  50.0, 0),
-        _row(2, 3 * SECONDS_PER_DAY + 200, 1000, 50, 5,  70.0, 0),
-        _row(3, 3 * SECONDS_PER_DAY + 200, 1000, 50, 5,  30.0, 1),   # empate DT con id=2
+        _row(1, 1 * SECONDS_PER_DAY + 100, 1000, 50, 5, 50.0, 0),
+        _row(2, 3 * SECONDS_PER_DAY + 200, 1000, 50, 5, 70.0, 0),
+        _row(3, 3 * SECONDS_PER_DAY + 200, 1000, 50, 5, 30.0, 1),  # empate DT con id=2
         _row(4, 9 * SECONDS_PER_DAY + 500, 1000, 50, 5, 120.0, 0),
-
         _row(5, 2 * SECONDS_PER_DAY + 300, 2000, 60, 8, 200.0, 0),
         _row(6, 6 * SECONDS_PER_DAY + 100, 2000, 60, 8, 210.0, 0),
         _row(7, 8 * SECONDS_PER_DAY + 900, 2000, 60, 8, 400.0, 1),

@@ -31,6 +31,7 @@ CFG = SimpleNamespace(F=20.0, m=0.25, phi=10.0, r=2.0)
 
 # ----------------------------------------------------- extremos (p = 0, p = 1)
 
+
 def test_certain_fraud_makes_blocking_free():
     """p=1: bloquear no pierde nada (no había venta legítima que perder)."""
     assert cost_block(1.0, 100.0, CFG) == pytest.approx(0.0)
@@ -45,6 +46,7 @@ def test_certain_legit_makes_approving_free():
 
 
 # ----------------------------------------------------------- casos con lápiz
+
 
 def test_hand_computed_moderate_case():
     """p=0.2, amt=100: approve = 0.2·120 = 24; block = 0.8·35 = 28; V = 24-2 = 22."""
@@ -80,9 +82,7 @@ def test_value_peaks_at_moderate_probability():
     amt = 100.0
     p_star = (0.25 * amt + 10.0) / ((amt + 20.0) + (0.25 * amt + 10.0))
     assert p_star == pytest.approx(35.0 / 155.0)
-    assert cost_approve(p_star, amt, CFG) == pytest.approx(
-        cost_block(p_star, amt, CFG)
-    )
+    assert cost_approve(p_star, amt, CFG) == pytest.approx(cost_block(p_star, amt, CFG))
     v_peak = value_of_review(p_star, amt, CFG)
     assert v_peak > value_of_review(p_star - 0.1, amt, CFG)
     assert v_peak > value_of_review(p_star + 0.1, amt, CFG)
@@ -90,6 +90,7 @@ def test_value_peaks_at_moderate_probability():
 
 
 # ------------------------------------------------------------- vectorización
+
 
 def test_vectorized_matches_scalar():
     """El contrato exige numpy: arrays entran, arrays salen, sin bucles."""
@@ -106,10 +107,10 @@ def test_vectorized_matches_scalar():
 
 # ------------------------------------------------------------ costo realizado
 
+
 def test_realized_cost_hand_table():
     """La tabla contable completa, caso por caso (docstring de realized_cost)."""
-    actions = np.array(["approve", "approve", "block", "block", "review", "review"],
-                       dtype=object)
+    actions = np.array(["approve", "approve", "block", "block", "review", "review"], dtype=object)
     is_fraud = np.array([1, 0, 0, 1, 1, 0])
     amt = np.array([100.0, 100.0, 100.0, 100.0, 100.0, 100.0])
     out = np.asarray(realized_cost(actions, is_fraud, amt, CFG), dtype=float)
@@ -127,13 +128,15 @@ def test_expected_cost_is_probability_weighted_realized_cost():
     no mide lo que la política optimiza.
     """
     p, amt = 0.3, 80.0
-    exp_approve = p * float(realized_cost(np.array(["approve"], dtype=object),
-                                          np.array([1]), np.array([amt]), CFG)[0]) \
-        + (1 - p) * float(realized_cost(np.array(["approve"], dtype=object),
-                                        np.array([0]), np.array([amt]), CFG)[0])
-    exp_block = p * float(realized_cost(np.array(["block"], dtype=object),
-                                        np.array([1]), np.array([amt]), CFG)[0]) \
-        + (1 - p) * float(realized_cost(np.array(["block"], dtype=object),
-                                        np.array([0]), np.array([amt]), CFG)[0])
+    exp_approve = p * float(
+        realized_cost(np.array(["approve"], dtype=object), np.array([1]), np.array([amt]), CFG)[0]
+    ) + (1 - p) * float(
+        realized_cost(np.array(["approve"], dtype=object), np.array([0]), np.array([amt]), CFG)[0]
+    )
+    exp_block = p * float(
+        realized_cost(np.array(["block"], dtype=object), np.array([1]), np.array([amt]), CFG)[0]
+    ) + (1 - p) * float(
+        realized_cost(np.array(["block"], dtype=object), np.array([0]), np.array([amt]), CFG)[0]
+    )
     assert exp_approve == pytest.approx(cost_approve(p, amt, CFG))
     assert exp_block == pytest.approx(cost_block(p, amt, CFG))

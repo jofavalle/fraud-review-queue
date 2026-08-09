@@ -29,11 +29,13 @@ import pandas as pd
 def pr_auc(y_true, scores) -> float:
     """Average precision (área bajo la curva precision-recall)."""
     from sklearn.metrics import average_precision_score
+
     return float(average_precision_score(y_true, scores))
 
 
 def roc_auc(y_true, scores) -> float:
     from sklearn.metrics import roc_auc_score
+
     return float(roc_auc_score(y_true, scores))
 
 
@@ -83,6 +85,7 @@ def recall_at_k(y_true, scores, k: int) -> float:
 # ---------------------------------------------------------------------------
 # Calibración (Día 5). Numpy/pandas puro — sin sklearn.
 # ---------------------------------------------------------------------------
+
 
 def brier_score(y_true, p) -> float:
     """Error cuadrático medio de las probabilidades: mean((p - y)^2).
@@ -142,15 +145,17 @@ def reliability_table(y_true, p, n_bins: int = 10) -> pd.DataFrame:
         mask = idx == b
         if not mask.any():
             continue
-        rows.append({
-            "bin": b,
-            "p_lo": b / n_bins,
-            "p_hi": (b + 1) / n_bins,
-            "mean_p": p[mask].mean(),
-            "frac_pos": y_true[mask].mean(),
-            "count": int(mask.sum()),
-            "weight": mask.sum() / len(p),
-        })
+        rows.append(
+            {
+                "bin": b,
+                "p_lo": b / n_bins,
+                "p_hi": (b + 1) / n_bins,
+                "mean_p": p[mask].mean(),
+                "frac_pos": y_true[mask].mean(),
+                "count": int(mask.sum()),
+                "weight": mask.sum() / len(p),
+            }
+        )
     return pd.DataFrame(rows)
 
 

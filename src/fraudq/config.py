@@ -174,9 +174,7 @@ class PolicyConfig:
 
     def __post_init__(self) -> None:
         if not 0.0 < self.daily_capacity_pct <= 1.0:
-            raise ValueError(
-                f"daily_capacity_pct must be in (0, 1], got {self.daily_capacity_pct}"
-            )
+            raise ValueError(f"daily_capacity_pct must be in (0, 1], got {self.daily_capacity_pct}")
 
     def daily_capacity(self, n_transactions_today: int) -> int:
         """Reviews available today, given the day's transaction volume."""

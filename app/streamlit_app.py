@@ -98,19 +98,31 @@ c1.metric(
     delta=f"${savings['savings_per_1k']:.2f} per $1,000",
 )
 c2.metric("Loss per $1,000 (value-ranked)", f"${by_value['cost_per_1k']:.2f}")
-c3.metric("Frauds caught", f"{int(by_value['frauds_caught']):,}",
-          delta=int(by_value["frauds_caught"] - by_score["frauds_caught"]))
-c4.metric("Legit blocked", f"{int(by_value['legit_blocked']):,}",
-          delta=int(by_value["legit_blocked"] - by_score["legit_blocked"]),
-          delta_color="inverse")
+c3.metric(
+    "Frauds caught",
+    f"{int(by_value['frauds_caught']):,}",
+    delta=int(by_value["frauds_caught"] - by_score["frauds_caught"]),
+)
+c4.metric(
+    "Legit blocked",
+    f"{int(by_value['legit_blocked']):,}",
+    delta=int(by_value["legit_blocked"] - by_score["legit_blocked"]),
+    delta_color="inverse",
+)
 
 st.dataframe(
-    comparison.style.format({
-        "total_cost": "${:,.0f}", "cost_per_1k": "${:.2f}",
-        "utilization": "{:.1%}",
-        "frauds_caught": "{:.0f}", "frauds_missed": "{:.0f}",
-        "legit_blocked": "{:.0f}", "reviews": "{:.0f}", "capacity": "{:.0f}",
-    }),
+    comparison.style.format(
+        {
+            "total_cost": "${:,.0f}",
+            "cost_per_1k": "${:.2f}",
+            "utilization": "{:.1%}",
+            "frauds_caught": "{:.0f}",
+            "frauds_missed": "{:.0f}",
+            "legit_blocked": "{:.0f}",
+            "reviews": "{:.0f}",
+            "capacity": "{:.0f}",
+        }
+    ),
     use_container_width=True,
 )
 st.caption(
@@ -136,8 +148,14 @@ with col_fig:
     region = np.where(v > 0, 1, np.where(approve_c <= block_c, 0, 2))
 
     fig, ax = plt.subplots(figsize=(7, 4.5))
-    ax.contourf(P, A, region, levels=[-0.5, 0.5, 1.5, 2.5], alpha=0.35,
-                colors=["#2a9d8f", "#e9c46a", "#e76f51"])
+    ax.contourf(
+        P,
+        A,
+        region,
+        levels=[-0.5, 0.5, 1.5, 2.5],
+        alpha=0.35,
+        colors=["#2a9d8f", "#e9c46a", "#e76f51"],
+    )
     ax.set_yscale("log")
     ax.set_xlabel("Calibrated fraud probability p")
     ax.set_ylabel("Transaction amount ($, log)")
@@ -169,8 +187,10 @@ def daily_series(F: float, m: float, phi: float, r: float, k_pct: float) -> pd.D
     cfg = SimpleNamespace(F=F, m=m, phi=phi, r=r)
     a = simulate_queue(df, actions_topk_by_score, cfg, k_pct).per_day
     b = simulate_queue(df, actions_topk_by_value, cfg, k_pct).per_day
-    out = a[["day", "cost"]].rename(columns={"cost": "score-ranked"}).merge(
-        b[["day", "cost"]].rename(columns={"cost": "value-ranked"}), on="day"
+    out = (
+        a[["day", "cost"]]
+        .rename(columns={"cost": "score-ranked"})
+        .merge(b[["day", "cost"]].rename(columns={"cost": "value-ranked"}), on="day")
     )
     return out.set_index("day")
 
