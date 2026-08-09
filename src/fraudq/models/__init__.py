@@ -1,1 +1,1 @@
-"""Modelos de fraud-review-queue: baselines sin rebalanceo (design.md §7)."""
+"""Models: baselines with no resampling (design.md §6)."""

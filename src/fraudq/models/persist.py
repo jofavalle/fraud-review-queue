@@ -1,18 +1,15 @@
-"""Persistencia de artefactos: booster + calibrador + metadatos — delegable.
+"""Artefact persistence: booster, calibrator and metadata.
 
-Va en: fraud-review-queue/src/fraudq/models/persist.py
+The contract between training and deployment: what the API and the Streamlit
+app load is EXACTLY what the evaluation used. An artefact directory holds:
 
-El contrato entre el entrenamiento (Días 4-5) y el despliegue (Día 8): lo que
-la API y el Streamlit cargan es EXACTAMENTE lo que la evaluación del Día 6
-usó. Un directorio de artefactos contiene:
+    model.txt        LightGBM booster, in its native format
+    calibrator.pkl   PlattCalibrator or IsotonicCalibrator
+    metadata.json    feature_cols plus a snapshot of the cost parameters
 
-    model.txt        — LightGBM booster (formato nativo)
-    calibrator.pkl   — PlattCalibrator o IsotonicCalibrator (Día 5)
-    metadata.json    — feature_cols + snapshot de los parámetros de costo
-
-El snapshot de costos va en los metadatos a propósito: la API decide con los
-MISMOS parámetros congelados con los que se midió el resultado del README. Si
-el negocio cambia F o φ, se regeneran artefactos — no se editan a mano.
+The cost snapshot goes into the metadata deliberately: the API decides with the
+SAME frozen parameters the README result was measured under. If the business
+changes F or phi, the artefacts are regenerated rather than hand-edited.
 """
 
 from __future__ import annotations
@@ -30,7 +27,7 @@ _COST_KEYS = ("F", "m", "phi", "r")
 
 
 def save_artifacts(dir_path, booster, calibrator, feature_cols, cost_cfg) -> Path:
-    """Guarda el trío de artefactos. `cost_cfg` es duck-typed (F, m, phi, r)."""
+    """Save the three artefacts. `cost_cfg` is duck-typed on (F, m, phi, r)."""
     out = Path(dir_path)
     out.mkdir(parents=True, exist_ok=True)
 
@@ -47,19 +44,17 @@ def save_artifacts(dir_path, booster, calibrator, feature_cols, cost_cfg) -> Pat
 
 
 def load_artifacts(dir_path):
-    """Carga (booster, calibrator, feature_cols, cost_cfg) desde un directorio.
+    """Load (booster, calibrator, feature_cols, cost_cfg) from a directory.
 
-    `cost_cfg` vuelve como SimpleNamespace(F, m, phi, r): la misma interfaz
-    duck-typed que consume policy/costs.py.
+    `cost_cfg` comes back as SimpleNamespace(F, m, phi, r), the same duck-typed
+    interface policy/costs.py consumes.
     """
     import lightgbm as lgb
 
     src = Path(dir_path)
     for name in (MODEL_FILE, CALIBRATOR_FILE, METADATA_FILE):
         if not (src / name).exists():
-            raise FileNotFoundError(
-                f"Falta {name} en {src}. ¿Corriste save_artifacts tras el Día 6?"
-            )
+            raise FileNotFoundError(f"{name} is missing from {src}. Was save_artifacts run?")
 
     booster = lgb.Booster(model_file=str(src / MODEL_FILE))
     with open(src / CALIBRATOR_FILE, "rb") as f:

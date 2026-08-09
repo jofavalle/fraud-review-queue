@@ -1,26 +1,23 @@
-"""Tuning de LightGBM con Optuna — TIMEBOXED a 3 horas de reloj (H5).
+"""LightGBM tuning with Optuna, TIMEBOXED to three hours of wall clock.
 
-Va en: fraud-review-queue/src/fraudq/models/tune.py
+## Where tuning sits in this project (read before running anything)
 
-## El lugar del tuning en este proyecto (léelo antes de correr nada)
+Tuning is the FIRST thing to cut. Nothing here is won by lifting PR-AUC from
+0.85 to 0.86; the project is won in the decision layer. Hence:
 
-El orden de sacrificio (plan §13) dice: **el tuning es lo PRIMERO que se
-corta.** Nadie te contrata por subir el PR-AUC de 0.85 a 0.86; el proyecto se
-gana en la capa de decisión de mañana. Por eso:
+- `timeout_s` defaults to three hours. When it fires, it is over, and the best
+  trial so far wins. It does not get extended "because it was still improving".
+- The objective is the MEAN PR-AUC across the expanding-window folds, the same
+  CV as `cv_lightgbm`. Neither calib nor test is touched.
+- The anti-resampling guard (`_validate_params`) runs inside `cv_lightgbm` here
+  too: Optuna cannot propose `scale_pos_weight` even if asked to.
 
-- `timeout_s` por defecto = 3 horas. Cuando suena, se acaba — el mejor trial
-  hasta ese momento gana. No se extiende "porque iba mejorando".
-- El objetivo es la MEDIA de PR-AUC en los folds de ventana expansiva, la
-  misma CV del Día 4 (`cv_lightgbm`). Ni calib ni test se tocan.
-- La guarda anti-rebalanceo del Día 4 (`_validate_params`) corre dentro de
-  `cv_lightgbm` también aquí: Optuna no puede proponer `scale_pos_weight` ni
-  aunque se lo pidieras.
+The search space is deliberately SMALL: the six or seven parameters that move
+the needle in a GBDT, over sensible ranges. A huge space in three hours is
+noise.
 
-Espacio de búsqueda deliberadamente CHICO: los 6-7 parámetros que mueven la
-aguja en GBDT, con rangos razonables. Un espacio gigante en 3 horas es ruido.
-
-optuna y lightgbm se importan dentro de la función: el módulo es importable
-sin ellos (y optuna no es dependencia del resto del paquete).
+optuna and lightgbm are imported inside the function, so the module imports
+without them, and optuna is not a dependency of the rest of the package.
 """
 
 from __future__ import annotations
@@ -39,22 +36,21 @@ def tune_lightgbm(
     n_trials: int = 60,
     seed: int = 7,
 ) -> tuple[dict, object]:
-    """Busca hiperparámetros maximizando la media de PR-AUC en la CV del Día 4.
+    """Search hyperparameters maximising the mean PR-AUC over the CV folds.
 
     Parameters
     ----------
     base_params:
-        Los parámetros de tu `ModelConfig` (fuente única, design.md §9.1).
-        Lo que Optuna no toca (p. ej. `subsample_freq=1`) se hereda de aquí.
+        The parameters of `ModelConfig`, the single source. Whatever Optuna
+        does not touch, such as `subsample_freq=1`, is inherited from here.
     timeout_s / n_trials:
-        Lo que ocurra primero corta el estudio. El timeout ES el timebox de H5.
+        Whichever comes first ends the study. The timeout IS the timebox.
 
     Returns
     -------
     (best_params, study):
-        `best_params` = base_params ∪ los del mejor trial — listos para
-        `train_final_lgbm`. El `study` se devuelve para inspección; el registro
-        de la decisión final va en la bitácora, no en un dashboard.
+        `best_params` is base_params merged with the best trial's, ready for
+        `train_final_lgbm`. The `study` comes back for inspection.
     """
     import optuna
 
@@ -66,8 +62,8 @@ def tune_lightgbm(
             "min_child_samples": trial.suggest_int("min_child_samples", 10, 200, log=True),
             "feature_fraction": trial.suggest_float("feature_fraction", 0.4, 1.0),
             "subsample": trial.suggest_float("subsample", 0.5, 1.0),
-            # El invariante del Día 1: LightGBM IGNORA subsample si
-            # subsample_freq = 0, sin advertencia. Explícito, siempre.
+            # The invariant: LightGBM IGNORES subsample when subsample_freq is
+            # 0, without a warning. Explicit, always.
             "subsample_freq": 1,
             "lambda_l1": trial.suggest_float("lambda_l1", 1e-3, 10.0, log=True),
             "lambda_l2": trial.suggest_float("lambda_l2", 1e-3, 10.0, log=True),

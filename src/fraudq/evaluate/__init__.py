@@ -1,1 +1,1 @@
-"""Evaluación de fraud-review-queue: métricas de decisión, no de paper (§7.4)."""
+"""Evaluation: metrics for a decision, not for a paper (design.md §6.4)."""

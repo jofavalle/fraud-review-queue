@@ -1,36 +1,35 @@
-"""Calibración de probabilidades — Platt vs. isotónica, SOLO sobre calib.
+"""Probability calibration: Platt against isotonic, on calib ONLY.
 
-Va en: fraud-review-queue/src/fraudq/models/calibrate.py
+## Why this module exists (design.md §6.3)
 
-## Por qué existe este módulo (design.md §7.3, decisión A5)
+The whole cost layer consumes `p` as a REAL probability. The raw score of a
+GBDT ranks well but is not calibrated, and calibrating on train would give
+overconfident probabilities, since the model has already seen those labels.
+Rule 3 of the split (§4.3): the calibrator is fitted EXCLUSIVELY on the
+calibration partition (days 130 to 155), which the model never saw.
 
-Toda la capa de costos del Día 6 consume `p` como probabilidad REAL. El score
-crudo de un GBDT rankea bien pero no está calibrado; y calibrar sobre train
-daría probabilidades sobreconfiadas (el modelo ya vio esas etiquetas). Regla 3
-del split (§4.2): el calibrador se ajusta EXCLUSIVAMENTE en la partición de
-calibración (días 130-155), que el modelo nunca vio.
+## The two methods (§6.3)
 
-## Los dos métodos (§7.3)
+- **Platt**: a sigmoid over the LOG-ODDS of the score. Two parameters, robust,
+  works with few positives. It assumes the distortion is logistic.
+- **Isotonic**: non-parametric, assuming only monotonicity. More flexible, but
+  with little data it overfits into steps. With around 26 days of calib at
+  roughly 3.5 % positives there is enough signal, and the comparison decides
+  rather than the dogma.
 
-- **Platt**: una sigmoide sobre el LOG-ODDS del score. Dos parámetros, robusto,
-  funciona con pocos positivos. Supone que la distorsión es logística.
-- **Isotónica**: no paramétrica; solo asume monotonía. Más flexible, pero con
-  pocos datos sobreajusta (escalones). Con ~26 días de calib × ~3.5 % de
-  positivos hay señal suficiente — la comparación decide, no el dogma.
+Both expose the SAME interface: `.predict(scores) -> p in [0,1]`,
+non-decreasing in the raw score. That interface is a contract, and
+`tests/test_calibrated_probs_valid.py` guards it.
 
-Ambos exponen la MISMA interfaz: `.predict(scores) -> p en [0,1]`, monotónica
-no-decreciente respecto del score crudo. Esa interfaz es un contrato: la
-vigila `tests/test_calibrated_probs_valid.py`.
+## How to choose without cheating
 
-## Cómo elegir sin hacerse trampa
+The choice between Platt and isotonic uses a TEMPORAL holdout inside calib
+(`temporal_calibration_split`): fit on the first days, compare Brier and ECE on
+the last. Comparing on the same data used to fit would always favour isotonic,
+which is more flexible. The test set appears nowhere: it is looked at ONCE, at
+the end.
 
-La elección Platt vs. isotónica usa un holdout TEMPORAL dentro de calib
-(`temporal_calibration_split`): se ajusta en los primeros días, se compara
-Brier/ECE en los últimos. Comparar sobre los mismos datos del ajuste
-favorecería siempre a la isotónica (es más flexible). El test set no aparece
-por ningún lado: se mira UNA vez, el Día 6.
-
-sklearn se importa dentro de las funciones: el módulo es importable sin él.
+sklearn is imported inside the functions, so the module imports without it.
 """
 
 from __future__ import annotations
@@ -40,7 +39,7 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
-# Clip para el log-odds: evita ±inf en scores exactamente 0 o 1.
+# Clip for the log-odds: it avoids infinities at scores of exactly 0 or 1.
 _EPS = 1e-6
 
 
@@ -55,7 +54,7 @@ def _sigmoid(z: np.ndarray) -> np.ndarray:
 
 @dataclass(frozen=True)
 class PlattCalibrator:
-    """p = sigmoid(a * logit(score) + b). Monótona por construcción (a >= 0)."""
+    """p = sigmoid(a * logit(score) + b). Monotonic by construction, a >= 0."""
 
     coef_: float
     intercept_: float
@@ -66,7 +65,7 @@ class PlattCalibrator:
 
 @dataclass(frozen=True)
 class IsotonicCalibrator:
-    """Envuelve una IsotonicRegression ajustada. Monótona por definición."""
+    """Wraps a fitted IsotonicRegression. Monotonic by definition."""
 
     _iso: object
 
@@ -75,12 +74,12 @@ class IsotonicCalibrator:
 
 
 def fit_platt(scores, y) -> PlattCalibrator:
-    """Platt scaling sobre el log-odds del score.
+    """Platt scaling over the log-odds of the score.
 
-    Se ajusta sobre logit(s) y no sobre s directamente: el score de un GBDT ya
-    vive en (0,1) y la distorsión típica es aproximadamente lineal en log-odds.
-    `C` grande = sin regularización efectiva (dos parámetros no necesitan
-    prior, y regularizar sesgaría el intercept hacia 0.5).
+    It is fitted on logit(s) rather than on s directly: a GBDT score already
+    lives in (0,1) and the typical distortion is roughly linear in log-odds. A
+    large `C` means no effective regularisation, since two parameters need no
+    prior and regularising would bias the intercept towards 0.5.
     """
     from sklearn.linear_model import LogisticRegression
 
@@ -89,17 +88,17 @@ def fit_platt(scores, y) -> PlattCalibrator:
     lr.fit(z, np.asarray(y, dtype=int))
     coef = float(lr.coef_[0][0])
     if coef < 0:
-        # Una pendiente negativa invertiría el ranking del modelo: score alto
-        # -> p baja. Eso no es calibrar, es enmascarar un modelo roto.
+        # A negative slope would invert the model's ranking: high score, low p.
+        # That is not calibrating, it is masking a broken model.
         raise ValueError(
-            f"Platt produjo pendiente negativa ({coef:.4f}): el score no "
-            "rankea. Revisa el modelo antes de calibrar."
+            f"Platt produced a negative slope ({coef:.4f}): the score does not "
+            "rank. Check the model before calibrating."
         )
     return PlattCalibrator(coef_=coef, intercept_=float(lr.intercept_[0]))
 
 
 def fit_isotonic(scores, y) -> IsotonicCalibrator:
-    """Regresión isotónica creciente, acotada a [0,1], clip fuera de rango."""
+    """Increasing isotonic regression, bounded to [0,1], clipped out of range."""
     from sklearn.isotonic import IsotonicRegression
 
     iso = IsotonicRegression(y_min=0.0, y_max=1.0, increasing=True, out_of_bounds="clip")
@@ -112,29 +111,29 @@ def temporal_calibration_split(
     holdout_days: int = 6,
     day_col: str = "day",
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Parte calib en (ajuste, holdout) POR TIEMPO, no al azar.
+    """Cut calib into (fit, holdout) BY TIME, not at random.
 
-    Los últimos `holdout_days` días de calib quedan como holdout para comparar
-    Platt vs. isotónica. Misma religión que el resto del proyecto: hasta la
-    elección del calibrador respeta la flecha del tiempo. Un split aleatorio
-    aquí no sería un pecado grave (el calibrador es un mapa score->p), pero el
-    temporal es igual de barato y no abre la puerta a discusiones.
+    The last `holdout_days` days of calib become the holdout on which Platt and
+    isotonic are compared. Same religion as the rest of the project: even the
+    choice of calibrator respects the arrow of time. A random split here would
+    not be a grave sin, since the calibrator is a score-to-p map, but the
+    temporal one is just as cheap and opens no argument.
     """
     if holdout_days < 1:
-        raise ValueError(f"holdout_days debe ser >= 1, recibido {holdout_days}.")
+        raise ValueError(f"holdout_days must be >= 1, got {holdout_days}.")
     cut = int(df_calib[day_col].max()) - holdout_days
     fit_df = df_calib[df_calib[day_col] <= cut]
     hold_df = df_calib[df_calib[day_col] > cut]
     if fit_df.empty or hold_df.empty:
         raise ValueError(
-            f"Split de calibración degenerado (corte en día {cut}): "
-            f"{len(fit_df)} filas de ajuste, {len(hold_df)} de holdout."
+            f"Degenerate calibration split (cut at day {cut}): "
+            f"{len(fit_df)} fit rows, {len(hold_df)} holdout rows."
         )
     return fit_df.reset_index(drop=True), hold_df.reset_index(drop=True)
 
 
 def evaluate_calibrator(calibrator, scores, y_true, n_bins: int = 10) -> dict:
-    """Brier y ECE de un calibrador sobre (scores, y). `None` = score crudo."""
+    """Brier and ECE of a calibrator over (scores, y). `None` means raw score."""
     from fraudq.evaluate.metrics import brier_score, ece
 
     p = np.asarray(scores, dtype=float) if calibrator is None else calibrator.predict(scores)
@@ -142,10 +141,10 @@ def evaluate_calibrator(calibrator, scores, y_true, n_bins: int = 10) -> dict:
 
 
 def compare_calibrators(fit_scores, fit_y, eval_scores, eval_y, n_bins: int = 10) -> pd.DataFrame:
-    """Tabla raw / platt / isotonic con Brier y ECE sobre el conjunto de eval.
+    """A raw / platt / isotonic table with Brier and ECE over the eval set.
 
-    `raw` es la fila "antes" de la curva antes/después del README (§7.2): la
-    evidencia empírica de que el score crudo no era una probabilidad.
+    `raw` is the "before" row of the before-and-after curve in the README: the
+    empirical evidence that the raw score was not a probability.
     """
     rows = {
         "raw": None,

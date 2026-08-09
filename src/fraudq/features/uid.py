@@ -1,34 +1,32 @@
-"""Construcción del UID — entity resolution, NO leakage.
+"""Building the UID: entity resolution, NOT leakage.
 
-Va en: fraud-review-queue/src/fraudq/features/uid.py
+## The decision (design.md §5.2)
 
-## La decisión (design.md §5.2, registro de decisiones A3)
-
-IEEE-CIS no trae un identificador de cliente, pero se puede **reconstruir** uno
-aproximado:
+IEEE-CIS carries no customer identifier, but an approximate one can be
+**reconstructed**:
 
     D1n = day - D1
 
-`D1` es "días desde que la tarjeta fue vista por primera vez". Restándolo del día
-actual se obtiene una aproximación de la **fecha de registro de la tarjeta**, que
-es (aproximadamente) **constante para esa tarjeta**. Combinada con `card1` y
-`addr1`, identifica un cliente:
+`D1` is "days since the card was first seen". Subtracting it from the current
+day gives an approximation of the **card's registration date**, which is
+(approximately) **constant for that card**. Combined with `card1` and `addr1`,
+it identifies a customer:
 
     uid = card1 + '_' + addr1 + '_' + D1n
 
-### ¿Esto es leakage? No.
+### Is this leakage? No.
 
-- **Construir el UID es *entity resolution*.** En un sistema de fraude real **sí**
-  existe un identificador persistente de cliente en el momento del scoring.
-  Reconstruirlo desde columnas anonimizadas recupera información que en producción
-  estaría disponible. Es legítimo.
-- **Lo que SÍ sería leakage** es agregar el *target* (`isFraud`) sobre el UID
-  usando el dataset completo — eso mira etiquetas del futuro. Este módulo **no
-  toca `isFraud`**; las agregaciones (retrospectivas) viven en `build.py` y las
-  vigila `tests/test_no_future_leakage.py`.
+- **Building the UID is *entity resolution*.** A real fraud system **does** have
+  a persistent customer identifier at scoring time. Reconstructing it from
+  anonymised columns recovers information that would be available in
+  production. That is legitimate.
+- **What WOULD be leakage** is aggregating the *target* (`isFraud`) over the UID
+  across the whole dataset, since that looks at labels from the future. This
+  module **never touches `isFraud`**; the backward-looking aggregates live in
+  `build.py` and `tests/test_no_future_leakage.py` watches them.
 
-Requiere que `df` ya tenga la columna `day` (la deriva la ingesta desde
-`TransactionDT`; ver data/ingest.py).
+It requires `df` to already carry the `day` column, which the ingestion derives
+from `TransactionDT` (see data/ingest.py).
 """
 
 from __future__ import annotations
@@ -39,37 +37,37 @@ UID_COLS = ("card1", "addr1", "D1")
 
 
 def add_uid(df: pd.DataFrame) -> pd.DataFrame:
-    """Devuelve una copia de `df` con las columnas `D1n` y `uid` añadidas.
+    """Return a copy of `df` with the `D1n` and `uid` columns added.
 
-    - `D1n = day - D1` (proxy de la fecha de registro de la tarjeta), como
-      entero nullable (`Int64`). El casteo importa: si `D1` es float (tiene
-      NaN), sin él `D1n` sería '5.0' en un subset y '5' en otro, y el uid
-      cambiaría según qué filas estén presentes.
-    - `uid` = 'card1_addr1_D1n' como string.
+    - `D1n = day - D1`, a proxy for the card's registration date, as a nullable
+      integer (`Int64`). The cast matters: if `D1` is float, because it carries
+      NaN, then without it `D1n` would be '5.0' in one subset and '5' in
+      another, and the uid would change with which rows happen to be present.
+    - `uid` = 'card1_addr1_D1n' as a string.
 
-    No modifica `df` in situ.
+    It does not modify `df` in place.
 
-    **Nulos:** si CUALQUIER componente es nulo, el `uid` completo queda **NULL**
-    (pd.NA se propaga en la concatenación de dtype 'string'). Esto es
-    deliberado y `build.py` lo respeta: las features de una fila sin uid son
-    NULL. La alternativa —agrupar los nulos bajo un uid literal común— sería
-    un error grave: `PARTITION BY` juntaría transacciones de clientes sin
-    relación en una sola "identidad" gigante y los agregados fabricarían
-    historia falsa.
+    **Nulls:** if ANY component is null, the whole `uid` comes out **NULL**,
+    because pd.NA propagates through concatenation of dtype 'string'. That is
+    deliberate and `build.py` honours it: the features of a row with no uid are
+    NULL. The alternative, grouping the nulls under one literal uid, would be a
+    serious mistake: `PARTITION BY` would gather transactions from unrelated
+    customers into a single giant "identity" and the aggregates would
+    manufacture false history.
     """
     missing = [c for c in ("day", *UID_COLS) if c not in df.columns]
     if missing:
         raise KeyError(
-            f"Faltan columnas para construir el UID: {missing}. "
-            "¿Corriste la ingesta (deriva `day`) antes de las features?"
+            f"Columns missing to build the UID: {missing}. "
+            "Was the ingestion, which derives `day`, run before the features?"
         )
 
     out = df.copy()
 
-    # round() antes de Int64: estas columnas llegan como float (nullable: los
-    # nulos fuerzan float64 en pandas) y el casteo directo falla o es inseguro
-    # ante artefactos de coma flotante. Sin la normalizacion, addr1=50.0 daria
-    # uid '1000_50.0_5' en vez de '1000_50_5'.
+    # round() before Int64: these columns arrive as float, since nulls force
+    # float64 in pandas, and a direct cast either fails or is unsafe against
+    # floating-point artefacts. Without the normalisation, addr1=50.0 would
+    # give the uid '1000_50.0_5' instead of '1000_50_5'.
     def _int_str(series: pd.Series) -> pd.Series:
         return series.round().astype("Int64").astype("string")
 

@@ -1,38 +1,28 @@
-"""
-================================================================================
-  EL NÚCLEO DE ESTE ARCHIVO LO ESCRIBES TÚ.  (plan §5.3 — "Escribo yo")
-================================================================================
+"""Sensitivity of the conclusion to the cost assumptions (design.md §7.2).
 
-El análisis de sensibilidad es TU diferenciador (design.md §8.3): vienes de un
-campo donde un número sin barra de error es inaceptable. Por eso el barrido —
-la parte que convierte supuestos en incertidumbre — es tuyo. Lo que te dejo
-hecho es lo delegable: la figura (tornado) y la extracción del ahorro.
+The four cost parameters are assumed, not measured, so the honest question is
+not what the saving is but how much of it survives the assumptions moving.
 
-Va en: fraud-review-queue/src/fraudq/evaluate/sensitivity.py
+## The two rules that make this an analysis rather than a justification
 
---------------------------------------------------------------------------------
-Las dos reglas que hacen que esto sea un análisis y no una justificación
---------------------------------------------------------------------------------
-1. **Los rangos se leen de `SENSITIVITY_RANGES` en config.py** — fijados ANTES
-   de ver los resultados (§13.5). Elegir rangos después de conocer el número
-   convierte el tornado en marketing.
-2. **El config es frozen; las variantes se crean con `dataclasses.replace`.**
-   Tu propia respuesta de entrevista del Día 1: si los parámetros no fluyeran
-   como argumento, el barrido daría resultados idénticos para todos los valores
-   sin lanzar excepción — y creerías que tu conclusión es más robusta de lo
-   que es.
+1. **The ranges are read from `SENSITIVITY_RANGES` in config.py**, fixed BEFORE
+   the results were seen. Choosing ranges once the number is known turns the
+   tornado into marketing.
+2. **The config is frozen and the variants are built with
+   `dataclasses.replace`.** If the parameters did not flow through as
+   arguments, the sweep would return identical results for every value without
+   raising anything, and the conclusion would look more robust than it is.
 
---------------------------------------------------------------------------------
-El contrato de `tornado_data` (lo que asume plot_tornado y el notebook)
---------------------------------------------------------------------------------
-DataFrame con una fila por parámetro barrido:
+## The contract of `tornado_data` (what plot_tornado and the notebook assume)
+
+A DataFrame with one row per swept parameter:
 
     param     | low   | high  | savings_at_low | savings_at_high | swing
-    "F"       | 10.0  | 40.0  | ...            | ...             | |alto-bajo|
+    "F"       | 10.0  | 40.0  | ...            | ...             | |high-low|
 
-ordenado por `swing` DESCENDENTE (el tornado se lee de arriba hacia abajo).
-`savings_*` es el ahorro por $1,000 de la política 4 sobre la 3 con TODOS los
-demás parámetros en su valor base.
+sorted by `swing` DESCENDING, since the tornado is read from the top down.
+`savings_*` is the per-$1,000 saving of policy 4 over policy 3 with ALL the
+other parameters at their base value.
 """
 
 from __future__ import annotations
@@ -43,7 +33,7 @@ import pandas as pd
 
 
 def savings_per_1k(comparison: pd.DataFrame) -> float:
-    """Extrae el ahorro por $1,000 (política 4 vs. 3) de una tabla de compare_policies."""
+    """Pull the per-$1,000 saving (policy 4 over 3) out of a compare_policies table."""
     return float(
         comparison.loc["topk_by_score", "cost_per_1k"]
         - comparison.loc["topk_by_value", "cost_per_1k"]
@@ -51,31 +41,31 @@ def savings_per_1k(comparison: pd.DataFrame) -> float:
 
 
 def tornado_data(base_cfg, ranges: dict, evaluate_fn) -> pd.DataFrame:
-    """Barrido uno-a-la-vez sobre los supuestos de costo (design.md §8.3).
+    """One-at-a-time sweep over the cost assumptions (design.md §7.2).
 
     Parameters
     ----------
     base_cfg:
-        TU CostConfig congelado (frozen=True), con los valores base.
+        The frozen CostConfig, at its base values.
     ranges:
-        `SENSITIVITY_RANGES` de config.py: {nombre_de_campo: (low, high)}.
-        Los nombres son los CAMPOS del dataclass (`chargeback_fee`, ...), no
-        los alias — `dataclasses.replace` no conoce propiedades.
+        `SENSITIVITY_RANGES` from config.py: {field_name: (low, high)}. The
+        names are the dataclass FIELDS (`chargeback_fee` and so on), not the
+        aliases, because `dataclasses.replace` knows nothing about properties.
     evaluate_fn:
-        callable(cfg) -> DataFrame de compare_policies sobre el scoring
-        PERSISTIDO del Día 6 (reports/scored_test.parquet). Nota bien: variar
-        parámetros de COSTO no re-mira el test — las predicciones ya están
-        hechas; cambia solo la capa de decisión.
+        callable(cfg) -> the compare_policies DataFrame over the PERSISTED
+        scoring (reports/scored_test.parquet). Note that varying COST
+        parameters does not look at test again: the predictions are already
+        made, and only the decision layer changes.
 
     Returns
     -------
-    El DataFrame del contrato de arriba, ordenado por `swing` descendente.
+    The DataFrame of the contract above, sorted by `swing` descending.
     """
     rows = []
     for param, (low, high) in ranges.items():
-        # `replace` sobre un dataclass frozen devuelve una copia: `base_cfg` no se
-        # toca, y cada variante mueve UN parámetro dejando los demás en su base.
-        # Eso es lo que hace que el swing sea atribuible a ese parámetro.
+        # `replace` on a frozen dataclass returns a copy: `base_cfg` is never
+        # touched, and each variant moves ONE parameter leaving the rest at
+        # base. That is what makes the swing attributable to that parameter.
         cfg_low = replace(base_cfg, **{param: low})
         cfg_high = replace(base_cfg, **{param: high})
 
@@ -89,15 +79,15 @@ def tornado_data(base_cfg, ranges: dict, evaluate_fn) -> pd.DataFrame:
                 "high": high,
                 "savings_at_low": savings_at_low,
                 "savings_at_high": savings_at_high,
-                # Valor absoluto: lo que mide el tornado es cuánto MUEVE el
-                # parámetro la conclusión, no en qué dirección la mueve. La
-                # dirección sigue legible en las dos columnas anteriores.
+                # Absolute value: what the tornado measures is how much the
+                # parameter MOVES the conclusion, not in which direction. The
+                # direction stays readable in the two columns above.
                 "swing": abs(savings_at_high - savings_at_low),
             }
         )
 
-    # Descendente: el tornado se lee de arriba hacia abajo, y la barra más larga
-    # es el parámetro que el negocio debería medir mejor.
+    # Descending: the tornado is read from the top down, and the longest bar is
+    # the parameter the business should go and measure properly.
     return (
         pd.DataFrame(
             rows, columns=["param", "low", "high", "savings_at_low", "savings_at_high", "swing"]
@@ -110,11 +100,10 @@ def tornado_data(base_cfg, ranges: dict, evaluate_fn) -> pd.DataFrame:
 def sensitivity_grid_2d(
     base_cfg, param_x: str, values_x, param_y: str, values_y, evaluate_fn
 ) -> pd.DataFrame:
-    """[OPCIONAL, §8.3 extensión] Malla 2D: ahorro en función de dos parámetros.
+    """An optional 2D grid: the saving as a function of two parameters.
 
-    Devuelve un DataFrame largo (param_x, param_y, savings_per_1k) listo para
-    un heatmap donde se colorea la región en la que tu política gana. Es una
-    figura preciosa y barata — SOLO si sobra tiempo (orden de sacrificio §13).
+    Returns a long DataFrame (param_x, param_y, savings_per_1k) ready for a
+    heatmap that colours the region where the value-ranked policy wins.
     """
     rows = [
         {
@@ -133,22 +122,22 @@ def sensitivity_grid_2d(
 def plot_tornado(
     tornado_df: pd.DataFrame, base_savings: float, ax=None, param_labels: dict | None = None
 ):
-    """El tornado plot (delegable: es una figura). Barras horizontales.
+    """The tornado plot: horizontal bars.
 
-    Cada barra va de `savings_at_low` a `savings_at_high`, ordenadas por
-    `swing` (la mayor arriba); la línea vertical es el ahorro con los
-    parámetros base. Si TODAS las barras viven a la derecha del cero, la
-    conclusión sobrevive el rango completo de supuestos — esa frase, tal
-    cual, es la que va en el README.
+    Each bar runs from `savings_at_low` to `savings_at_high`, sorted by `swing`
+    with the largest on top; the vertical line is the saving under the base
+    parameters. If ALL the bars live to the right of zero, the conclusion
+    survives the full range of assumptions, and that sentence, as it stands, is
+    the one that goes into the README.
 
-    matplotlib se importa adentro: el módulo es importable sin él.
+    matplotlib is imported inside, so the module imports without it.
     """
     import matplotlib.pyplot as plt
 
     if ax is None:
         _, ax = plt.subplots(figsize=(8, 0.6 * len(tornado_df) + 1.5))
 
-    df = tornado_df.iloc[::-1]  # la de mayor swing arriba
+    df = tornado_df.iloc[::-1]  # largest swing on top
     labels = [(param_labels or {}).get(row["param"], row["param"]) for _, row in df.iterrows()]
     lo = df[["savings_at_low", "savings_at_high"]].min(axis=1)
     hi = df[["savings_at_low", "savings_at_high"]].max(axis=1)
@@ -156,11 +145,11 @@ def plot_tornado(
     ax.barh(labels, hi - lo, left=lo, height=0.6, alpha=0.85)
     ax.axvline(base_savings, linestyle="--", linewidth=1.2, label="base")
     ax.axvline(0.0, color="black", linewidth=0.8)
-    # Un solo `$` en la cadena, a proposito: dos delimitan mathtext y matplotlib
-    # se come los simbolos y pone el texto de en medio en cursiva.
+    # A single `$` in the string, on purpose: two of them delimit mathtext, so
+    # matplotlib eats the symbols and italicises whatever sits between them.
     ax.set_xlabel("Savings of the value-ranked queue over the score-ranked, per $1,000")
-    # A la izquierda: las barras viven a la derecha del base, y en lower right la
-    # leyenda se solapaba con la fila del parametro de menor swing.
+    # Lower left: the bars live to the right of the base line, and at lower
+    # right the legend overlapped the row of the smallest-swing parameter.
     ax.legend(loc="lower left")
     ax.figure.tight_layout()
     return ax

@@ -1,48 +1,45 @@
-"""Agregados retrospectivos sobre el UID — el invariante anti-leakage en SQL.
+"""Backward-looking aggregates over the UID: the anti-leakage invariant in SQL.
 
-Va en: fraud-review-queue/src/fraudq/features/build.py
+## The invariant (design.md §5.3)
 
-## El invariante (design.md §5.3)
+> **Every aggregate over the UID is strictly backward-looking.** For row `i`,
+> the value is computed from **earlier transactions of the same UID only**,
+> never the current row and never a future one.
 
-> **Todo agregado sobre el UID es estrictamente retrospectivo.** Para la fila `i`,
-> el valor se calcula usando **solo transacciones anteriores del mismo UID** —
-> jamás la fila actual ni ninguna futura.
-
-En SQL eso es el frame:
+In SQL that is the frame:
 
     ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
 
-Ese `1 PRECEDING` **es** el `.shift(1)` de pandas: excluye la fila actual. Es,
-literalmente, el invariante anti-leakage expresado en window functions
-(plan de SQL §4.6). `LAG(...)` cumple el mismo rol para el gap temporal.
+That `1 PRECEDING` **is** pandas' `.shift(1)`: it excludes the current row. It
+is, literally, the anti-leakage invariant expressed in window functions.
+`LAG(...)` plays the same role for the time gap.
 
-## El contrato (lo que asume tests/test_no_future_leakage.py)
+## The contract (what tests/test_no_future_leakage.py assumes)
 
 `build_features(df)`:
 
-- Requiere en `df`: `TransactionID`, `TransactionDT`, `TransactionAmt`, y las
-  columnas para el UID (`day`, `card1`, `addr1`, `D1`). No usa `isFraud`.
-- Devuelve un `DataFrame` **ordenado por (`TransactionDT`, `TransactionID`)** con
-  el índice reseteado, columnas: las de identidad más las features.
-- **Filas sin uid** (algún componente nulo): sus cinco features son **NULL**.
-  Sin identidad no hay historia; agrupar los nulos entre sí fabricaría historia
-  cruzando clientes sin relación.
-- **Propiedad clave (la que verifica el test):** para cualquier corte temporal
-  `t`, las features de las filas con `TransactionDT <= t` son **idénticas** se
-  calcule sobre el histórico completo o sobre el histórico truncado en `t`.
-  Se cumple porque cada feature depende solo de filas estrictamente anteriores.
+- Requires in `df`: `TransactionID`, `TransactionDT`, `TransactionAmt`, and the
+  UID columns (`day`, `card1`, `addr1`, `D1`). It never uses `isFraud`.
+- Returns a `DataFrame` **ordered by (`TransactionDT`, `TransactionID`)** with a
+  reset index, whose columns are the identity ones plus the features.
+- **Rows with no uid**, where some component is null, get **NULL** in all five
+  features. Without an identity there is no history, and grouping the nulls
+  together would manufacture history across unrelated customers.
+- **The key property, the one the test checks:** for any time cut `t`, the
+  features of the rows with `TransactionDT <= t` are **identical** whether they
+  are computed over the full history or over the history truncated at `t`. It
+  holds because every feature depends only on strictly earlier rows.
 
-El desempate por `TransactionID` en el `ORDER BY` de la ventana hace el cálculo
-**determinista** ante empates de `TransactionDT` — sin él, el reparto entre filas
-de igual instante quedaría a criterio del motor y el test podría parpadear.
+The `TransactionID` tie-break in the window's `ORDER BY` makes the computation
+**deterministic** when `TransactionDT` ties. Without it, the split between rows
+sharing an instant would be up to the engine and the test could flicker.
 
-## Por qué DuckDB y no pandas
+## Why DuckDB and not pandas
 
-Son "queries de DuckDB" (columna delegable del plan §5.3): expresa el invariante
-de forma declarativa, corre sobre el `DataFrame` sin copiarlo a otra estructura, y
-es la misma práctica de window functions que necesitas para entrevistas. DuckDB
-consulta un `DataFrame` de pandas directamente por su nombre de variable
-registrado.
+SQL states the invariant declaratively, runs over the `DataFrame` without
+copying it into another structure, and keeps the window-function work in the
+language built for it. DuckDB queries a pandas `DataFrame` directly by its
+registered variable name.
 """
 
 from __future__ import annotations
@@ -53,12 +50,12 @@ import pandas as pd
 
 from fraudq.features.uid import add_uid
 
-# Columnas de identidad que se conservan tal cual en la salida.
+# Identity columns, carried through to the output untouched.
 _ID_COLS = ("TransactionID", "uid", "TransactionDT", "TransactionAmt")
 
-# Agregados estrictamente retrospectivos. Toda ventana ordena por
-# (TransactionDT, TransactionID) para ser determinista; el frame excluye la fila
-# actual con `1 PRECEDING`.
+# Strictly backward-looking aggregates. Every window orders by
+# (TransactionDT, TransactionID) to stay deterministic; the frame excludes the
+# current row with `1 PRECEDING`.
 _FEATURE_SQL = """
 SELECT
     TransactionID,
@@ -66,28 +63,29 @@ SELECT
     TransactionDT,
     TransactionAmt,
 
-    -- Toda feature es NULL si uid IS NULL: sin identidad no hay historia que
-    -- mirar, y NO se agrupan los nulos entre sí (sería historia fabricada).
+    -- Every feature is NULL when uid IS NULL: with no identity there is no
+    -- history to look at, and the nulls are NOT grouped together, which would
+    -- be manufactured history.
 
-    -- Nº de transacciones ANTERIORES del mismo uid (0 en la primera).
+    -- Number of EARLIER transactions of the same uid (0 on the first).
     CASE WHEN uid IS NULL THEN NULL
          ELSE COUNT(*) OVER w_prior END AS uid_txn_count_prior,
 
-    -- Segundos desde la transacción anterior del uid (NULL en la primera).
+    -- Seconds since the uid's previous transaction (NULL on the first).
     CASE WHEN uid IS NULL THEN NULL
          ELSE TransactionDT - LAG(TransactionDT) OVER w_order END AS uid_seconds_since_last,
 
-    -- Media de montos PREVIOS (NULL en la primera).
+    -- Mean of the PREVIOUS amounts (NULL on the first).
     CASE WHEN uid IS NULL THEN NULL
          ELSE AVG(TransactionAmt) OVER w_prior END AS uid_amt_prior_mean,
 
-    -- Monto actual / media previa. NULLIF evita dividir por 0.
+    -- Current amount over the previous mean. NULLIF avoids dividing by 0.
     CASE WHEN uid IS NULL THEN NULL
          ELSE TransactionAmt / NULLIF(AVG(TransactionAmt) OVER w_prior, 0)
          END AS uid_amt_ratio,
 
-    -- z-score contra la distribución PREVIA del uid.
-    -- STDDEV_SAMP necesita >= 2 datos previos -> NULL en la 1ª y la 2ª txn.
+    -- z-score against the uid's PREVIOUS distribution.
+    -- STDDEV_SAMP needs >= 2 earlier points, so NULL on the 1st and 2nd txn.
     CASE WHEN uid IS NULL THEN NULL
          ELSE (TransactionAmt - AVG(TransactionAmt) OVER w_prior)
               / NULLIF(STDDEV_SAMP(TransactionAmt) OVER w_prior, 0)
@@ -114,19 +112,19 @@ def build_features(
     df: pd.DataFrame,
     con: duckdb.DuckDBPyConnection | None = None,
 ) -> pd.DataFrame:
-    """Calcula los agregados retrospectivos del UID. Ver el contrato en el módulo.
+    """Compute the backward-looking UID aggregates. The contract is in the module.
 
     Parameters
     ----------
     df:
-        Transacciones crudas (con las columnas del UID). No se modifica in situ.
+        Raw transactions, carrying the UID columns. Not modified in place.
     con:
-        Conexión DuckDB opcional (para reutilizar). Si es None, se crea una
-        efímera y se cierra al terminar.
+        An optional DuckDB connection, to reuse one. If None, an ephemeral
+        connection is opened and closed on the way out.
 
     Returns
     -------
-    DataFrame ordenado por (TransactionDT, TransactionID), índice reseteado.
+    DataFrame ordered by (TransactionDT, TransactionID), index reset.
     """
     with_uid = add_uid(df)
 
@@ -144,23 +142,24 @@ def build_features(
 
 
 # --------------------------------------------------------------------------
-# Features base (design.md §5.1)
+# Base features (design.md §5.1)
 # --------------------------------------------------------------------------
 #
-# Los agregados del UID de arriba son la parte cara y delicada. Estas son la
-# parte barata, y no estaban en los entregables aunque el diseño las especifica:
-# sin ellas el modelo se entrenaría solo con las cinco columnas del UID.
+# The UID aggregates above are the expensive, delicate part. These are the
+# cheap part, and without them the model would train on the five UID columns
+# alone.
 #
-# Se separan en dos por una razón que no es estética: las de `add_base_features`
-# dependen únicamente de la propia fila, así que son inmunes al leakage y se
-# pueden calcular sobre el dataset entero. Las de `FrequencyEncoder` resumen la
-# distribución de una columna, así que **se ajustan solo en train** y se aplican
-# al resto; calcularlas sobre todo el dataset dejaría que calibración y test
-# influyeran en la representación de las filas de entrenamiento.
+# They are split in two for a reason that is not cosmetic: the ones in
+# `add_base_features` depend on their own row only, so they are immune to
+# leakage and can be computed over the whole dataset. The ones in
+# `FrequencyEncoder` summarise the distribution of a column, so they are
+# **fitted on train only** and applied to the rest; computing them over the
+# whole dataset would let calibration and test shape the representation of the
+# training rows.
 
 BASE_FEATURE_COLUMNS = ("amt_log", "amt_decimal", "hour")
 
-#: Categóricas de alta cardinalidad que se codifican por frecuencia.
+#: High-cardinality categoricals, encoded by frequency.
 FREQ_ENCODED_COLS = ("card1", "addr1", "P_emaildomain", "R_emaildomain")
 
 SECONDS_PER_HOUR = 3_600
@@ -168,17 +167,17 @@ HOURS_PER_DAY = 24
 
 
 def add_base_features(df: pd.DataFrame) -> pd.DataFrame:
-    """Features de §5.1 que dependen solo de la fila. No requieren ajuste.
+    """The §5.1 features that depend on their own row only. Nothing to fit.
 
-    - ``amt_log``: ``log1p`` del monto, que comprime la cola larga.
-    - ``amt_decimal``: la parte decimal del monto. Los importes convertidos de
-      otra divisa o generados por un programa dejan firmas raras aquí, mientras
-      que una compra humana tiende a terminar en .00 o .99.
-    - ``hour``: hora del día. La deriva la ingesta; se recalcula si falta, para
-      que la función sirva también sobre un DataFrame crudo.
+    - ``amt_log``: ``log1p`` of the amount, which compresses the long tail.
+    - ``amt_decimal``: the fractional part of the amount. Amounts converted
+      from another currency or generated by a program leave odd signatures
+      here, while a human purchase tends to end in .00 or .99.
+    - ``hour``: hour of the day. The ingestion derives it; it is recomputed if
+      absent, so the function also works on a raw DataFrame.
 
-    Los dominios de correo se reducen a su proveedor base (``gmail.com`` ->
-    ``gmail``) y se dejan como categóricas: quien las convierte en número es
+    Email domains are reduced to their base provider (``gmail.com`` ->
+    ``gmail``) and left categorical: what turns them into a number is
     `FrequencyEncoder`.
     """
     out = df.copy()
@@ -198,14 +197,14 @@ def add_base_features(df: pd.DataFrame) -> pd.DataFrame:
 
 
 class FrequencyEncoder:
-    """Codificación por frecuencia de categóricas de alta cardinalidad (§5.1).
+    """Frequency encoding of high-cardinality categoricals (§5.1).
 
-    Ajustada SOLO en train, que es lo que la hace legítima: la frecuencia de un
-    `card1` es un resumen de la distribución, y calcularlo sobre el dataset
-    completo filtraría al entrenamiento información de las particiones futuras.
+    Fitted on train ONLY, which is what makes it legitimate: the frequency of a
+    `card1` is a summary of the distribution, and computing it over the whole
+    dataset would leak information from the future partitions into training.
 
-    Una categoría no vista en train recibe frecuencia 0, que es la respuesta
-    correcta: en el momento de entrenar, ese valor no existía.
+    A category unseen in train gets frequency 0, which is the correct answer:
+    at training time, that value did not exist.
     """
 
     def __init__(self, cols: tuple[str, ...] = FREQ_ENCODED_COLS) -> None:
@@ -226,7 +225,7 @@ class FrequencyEncoder:
 
     def transform(self, df: pd.DataFrame) -> pd.DataFrame:
         if not self.freqs_:
-            raise RuntimeError("FrequencyEncoder sin ajustar: llama a fit() primero.")
+            raise RuntimeError("FrequencyEncoder is not fitted: call fit() first.")
         out = df.copy()
         for col, freq in self.freqs_.items():
             out[f"{col}_freq"] = out[col].map(freq).astype(float).fillna(0.0)

@@ -1,7 +1,7 @@
-"""Capa de decisión: costos esperados, asignación bajo capacidad, simulación.
+"""The decision layer: expected costs, allocation under capacity, simulation.
 
-El corazón del proyecto (design.md §8). costs.py y allocate.py los escribes
-TÚ (plan §5.3); simulate.py es el harness contable.
+The heart of the project (design.md §2). costs.py and allocate.py hold the
+decision rules; simulate.py is the accounting harness around them.
 """
 
 from fraudq.policy.allocate import allocate_day

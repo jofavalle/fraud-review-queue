@@ -1,34 +1,32 @@
-"""Las cuatro políticas de comparación (design.md §8.2) — completo (delegable).
+"""The four comparison policies (design.md §7.1).
 
-Va en: fraud-review-queue/src/fraudq/evaluate/policies.py
+| # | Policy             | What it stands for                              |
+|---|--------------------|-------------------------------------------------|
+| 1 | approve_all        | The baseline loss. Doing nothing.               |
+| 2 | single_threshold   | The naive system: block if p >= t.              |
+| 3 | topk_by_score      | What most people do: review the top-K by p.     |
+| 4 | topk_by_value      | The policy proposed here: top-K by V.           |
 
-| # | Política           | Qué representa                                  |
-|---|--------------------|--------------------------------------------------|
-| 1 | approve_all        | La pérdida basal. El "no hacer nada".            |
-| 2 | single_threshold   | El sistema ingenuo: bloquea si p >= t.           |
-| 3 | topk_by_score      | Lo que hace la mayoría: revisa el top-K por p.   |
-| 4 | topk_by_value      | TU política (allocate_day): top-K por V.         |
+## The design decision worth being able to defend
 
-## La decisión de diseño que hay que poder defender
+Policies 3 and 4 share the SAME automatic rule for whatever is not reviewed:
+the action of lowest expected cost. That way the only variable between them is
+THE RANKING of the queue, which is the thesis. Had policy 3 also been handed a
+dumb automatic rule, the difference would mix two effects and the number in the
+README would be inflated. Choosing the conservative comparison is what makes it
+credible.
 
-Las políticas 3 y 4 comparten la MISMA regla automática para lo no revisado
-(la acción de menor costo esperado). Así la única variable entre ambas es EL
-RANKING de la cola — que es la tesis. Si a la 3 se le diera además una regla
-automática tonta, la diferencia mezclaría dos efectos y el número del README
-estaría inflado. Elegir la comparación conservadora es lo que la hace creíble.
-(Va directo a tu registro de decisiones §III.)
+The threshold of policy 2 is fitted on CALIB, never on test; §4 gives that
+partition the job of fixing thresholds. `compare_policies` receives the
+threshold already fixed.
 
-El umbral de la política 2 se ajusta en CALIB (§4.1: "fijar umbrales"), jamás
-en test. `compare_policies` recibe el umbral ya fijado.
+## The single-look protocol
 
-## El protocolo de la única mirada
-
-`compare_policies(parts["test"], ...)` se ejecuta UNA vez, el Día 6, con los
-parámetros base de config.py, y el resultado se guarda en disco
-(reports/policy_comparison.csv + reports/scored_test.parquet). El tornado del
-Día 7 y el Streamlit del Día 8 REUSAN ese scoring persistido: varían los
-parámetros de COSTO sobre predicciones ya hechas — no vuelven a mirar el test
-para decidir nada del modelo.
+`compare_policies(parts["test"], ...)` runs ONCE, with the base parameters from
+config.py, and the result is written to disk (reports/policy_comparison.csv and
+reports/scored_test.parquet). The tornado and the Streamlit app REUSE that
+persisted scoring: they vary the COST parameters over predictions already made,
+and never look at test again to decide anything about the model.
 """
 
 from __future__ import annotations
@@ -43,19 +41,19 @@ from fraudq.policy.simulate import QueueResult, simulate_queue
 POLICY_ORDER = ("approve_all", "single_threshold", "topk_by_score", "topk_by_value")
 
 
-# ------------------------------------------------------------- las políticas
+# ---------------------------------------------------------------- the policies
 
 
 def actions_approve_all(p, amt, capacity, cfg) -> np.ndarray:
-    """Política 1: aprobar todo. La pérdida basal contra la que todo se mide."""
+    """Policy 1: approve everything. The baseline loss everything measures against."""
     return np.full(len(np.asarray(p)), "approve", dtype=object)
 
 
 def make_actions_single_threshold(threshold: float):
-    """Política 2: bloquear si p >= t, aprobar si no. Sin cola de revisión.
+    """Policy 2: block if p >= t, approve otherwise. No review queue.
 
-    Es el "sistema de un solo umbral sobre el score" del §2.4 — la política
-    estructuralmente equivocada porque el umbral óptimo depende del monto.
+    This is the "one threshold on the score" system of §2.2, the structurally
+    wrong policy, because the optimal threshold depends on the amount.
     """
 
     def actions_single_threshold(p, amt, capacity, cfg) -> np.ndarray:
@@ -66,16 +64,17 @@ def make_actions_single_threshold(threshold: float):
 
 
 def actions_topk_by_score(p, amt, capacity, cfg) -> np.ndarray:
-    """Política 3: revisar el top-K por SCORE; el resto, la mejor acción auto.
+    """Policy 3: review the top-K by SCORE; the rest get the best auto action.
 
-    La implementación ingenua de la cola: manda a los analistas a p > 0.9,
-    donde ya estás seguro y un humano no aporta información (§2.6). No filtra
-    por V > 0 — la política ingenua no sabe qué es V; gastar capacidad en
-    casos ya decididos ES su defecto, y se simula tal cual.
+    The naive implementation of the queue: it sends analysts to p > 0.9, where
+    the answer is already certain and a human adds no information (§2.4). It
+    does not filter by V > 0, because the naive policy does not know what V is.
+    Spending capacity on already-decided cases IS its defect, and it is
+    simulated exactly as such.
     """
     p = np.asarray(p, dtype=float)
     amt = np.asarray(amt, dtype=float)
-    order = np.argsort(-p, kind="stable")  # determinista ante empates
+    order = np.argsort(-p, kind="stable")  # deterministic on ties
     to_review = order[: max(int(capacity), 0)]
 
     approve_cheaper = cost_approve(p, amt, cfg) <= cost_block(p, amt, cfg)
@@ -85,11 +84,11 @@ def actions_topk_by_score(p, amt, capacity, cfg) -> np.ndarray:
 
 
 def actions_topk_by_value(p, amt, capacity, cfg) -> np.ndarray:
-    """Política 4: TU política. Delega en allocate_day (top-K por V, V > 0)."""
+    """Policy 4: the proposed one. It delegates to allocate_day, top-K by V > 0."""
     return allocate_day(p, amt, capacity, cfg)
 
 
-# ------------------------------------------- ajuste del umbral (en CALIB)
+# ------------------------------------------- fitting the threshold (on CALIB)
 
 
 def fit_single_threshold(
@@ -100,12 +99,12 @@ def fit_single_threshold(
     target: str = "isFraud",
     grid: np.ndarray | None = None,
 ) -> float:
-    """Elige el umbral de la política 2 minimizando el costo REALIZADO en calib.
+    """Pick policy 2's threshold by minimising the REALISED cost on calib.
 
-    En calib las etiquetas son legítimamente utilizables (§4.1: la partición
-    existe para "fijar umbrales y explorar K"). Vectorizado sin bucle por día:
-    la política 2 no tiene capacidad, así que el día no importa.
-    Empates: gana el umbral más bajo del grid (primero en orden).
+    On calib the labels are legitimately usable: the partition exists to fix
+    thresholds and explore K. There is no per-day loop, because policy 2 has no
+    capacity, so the day does not matter. On ties, the lowest threshold in the
+    grid wins, being first in order.
     """
     p = df_calib[p_col].to_numpy(dtype=float)
     amt = df_calib[amt_col].to_numpy(dtype=float)
@@ -120,7 +119,7 @@ def fit_single_threshold(
     return float(grid[int(np.argmin(costs))])
 
 
-# --------------------------------------------------------- la comparación
+# ------------------------------------------------------------ the comparison
 
 
 def compare_policies(
@@ -133,10 +132,10 @@ def compare_policies(
     day_col: str = "day",
     target: str = "isFraud",
 ) -> pd.DataFrame:
-    """Corre las 4 políticas sobre `df` y devuelve la tabla del README (§8.2).
+    """Run the four policies over `df` and return the README table (§7.1).
 
-    Una fila por política: costo total, costo por $1,000 (LA métrica),
-    fraudes atrapados/perdidos, legítimas bloqueadas, reviews y utilización.
+    One row per policy: total cost, cost per $1,000 (THE metric), frauds caught
+    and missed, legitimate transactions blocked, reviews and utilisation.
     """
     policies = {
         "approve_all": actions_approve_all,
@@ -164,11 +163,11 @@ def compare_policies(
 
 
 def headline_savings(comparison: pd.DataFrame) -> dict:
-    """EL número del README: política 4 vs. política 3 (design.md §8.2).
+    """THE number in the README: policy 4 against policy 3 (design.md §7.1).
 
-    Lo que deja sobre la mesa una organización que rankea su cola por score.
-    Positivo = tu política gana. Si sale chico, NO se tocan los parámetros:
-    se activa la contingencia §13.5 y cambia la tesis, no los supuestos.
+    What an organisation that ranks its queue by score leaves on the table. A
+    positive value means the proposed policy wins. If it comes out small, the
+    parameters are NOT touched: the thesis changes, not the assumptions.
     """
     cost3 = comparison.loc["topk_by_score", "total_cost"]
     cost4 = comparison.loc["topk_by_value", "total_cost"]

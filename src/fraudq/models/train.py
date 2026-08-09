@@ -1,30 +1,26 @@
-"""Baselines del Día 4: regresión logística + LightGBM, SIN rebalanceo.
+"""Baselines: logistic regression and LightGBM, with NO resampling.
 
-Va en: fraud-review-queue/src/fraudq/models/train.py
-
-## La regla contracultural (design.md §7.2) — codificada, no solo escrita
+## The counter-cultural rule (design.md §6.2), encoded rather than just written
 
 > No SMOTE. No undersampling. No `scale_pos_weight`. No `is_unbalance`.
 
-Todas esas técnicas distorsionan las probabilidades predichas, y toda la capa
-de costos depende de que `p` sea una probabilidad real. Aquí la regla no es un
-comentario: `_validate_params` **lanza** si aparece un parámetro de rebalanceo.
-El desbalance se maneja con la métrica (PR-AUC), no corrompiendo el
-entrenamiento.
+All of those distort the predicted probabilities, and the entire cost layer
+depends on `p` being a real probability. Here the rule is not a comment:
+`_validate_params` **raises** if a resampling parameter turns up. The imbalance
+is handled through the metric, PR-AUC, not by corrupting the training.
 
-## Fuente única de hiperparámetros
+## A single source of hyperparameters
 
-Los hiperparámetros viven en `config.py` (`ModelConfig`, design.md §9.1) — no
-aquí. Estas funciones reciben `params: dict`; pásalos desde tu config
-(`dataclasses.asdict(...)` o como lo tengas modelado). Recuerda el invariante
-de tu propio config: `subsample_freq = 1` explícito — LightGBM ignora
-`subsample` si `subsample_freq = 0`, sin advertencia.
+The hyperparameters live in `config.py` (`ModelConfig`), not here. These
+functions take `params: dict`, passed in from that config. Note the invariant
+the config itself carries: an explicit `subsample_freq = 1`, because LightGBM
+ignores `subsample` when `subsample_freq = 0`, without a warning.
 
-## Qué se evalúa hoy (y qué NO se toca)
+## What gets evaluated, and what is NOT touched
 
-La CV de ventana expansiva corre DENTRO de train (días 0-119). Hoy se reporta
-PR-AUC por fold. **Ni calib ni test se tocan**: calib es del calibrador (Día 5)
-y test se mira UNA vez (Día 6, H6).
+The expanding-window CV runs INSIDE train (days 0 to 119) and reports PR-AUC
+per fold. **Neither calib nor test is touched**: calib belongs to the
+calibrator, and test is looked at ONCE, at the end.
 """
 
 from __future__ import annotations
@@ -34,7 +30,7 @@ from dataclasses import dataclass, field
 import numpy as np
 import pandas as pd
 
-# Parámetros que rompen la calibración de probabilidades. Prohibidos por diseño.
+# Parameters that break probability calibration. Forbidden by design.
 _FORBIDDEN_PARAMS = (
     "scale_pos_weight",
     "is_unbalance",
@@ -45,37 +41,37 @@ _FORBIDDEN_PARAMS = (
 
 
 def _validate_params(params: dict) -> None:
-    """Codifica el invariante del §7.2: sin rebalanceo, punto."""
+    """Encode the invariant of §6.2: no resampling, full stop."""
     bad = [k for k in _FORBIDDEN_PARAMS if k in params]
     if bad:
         raise ValueError(
-            f"Parámetros de rebalanceo prohibidos por diseño: {bad}. "
-            "Distorsionan p y derrumban la capa de costos (design.md §7.2)."
+            f"Resampling parameters forbidden by design: {bad}. "
+            "They distort p and bring down the cost layer (design.md §6.2)."
         )
     if params.get("subsample") is not None and not params.get("subsample_freq"):
         raise ValueError(
-            "subsample sin subsample_freq >= 1: LightGBM lo IGNORA en silencio. "
-            "Declara subsample_freq=1 explícito (decisión del Día 1)."
+            "subsample without subsample_freq >= 1: LightGBM IGNORES it silently. "
+            "Declare subsample_freq=1 explicitly."
         )
 
 
 @dataclass
 class CVResult:
-    """Resultado de la validación cruzada de ventana expansiva."""
+    """The result of the expanding-window cross-validation."""
 
-    fold_ap: list[float] = field(default_factory=list)  # PR-AUC (AP) por fold
-    best_iters: list[int] = field(default_factory=list)  # mejor iteración por fold
+    fold_ap: list[float] = field(default_factory=list)  # PR-AUC (AP) per fold
+    best_iters: list[int] = field(default_factory=list)  # best iteration per fold
 
     @property
     def n_estimators(self) -> int:
-        """Nº de árboles para el modelo final: mediana de las mejores iteraciones."""
+        """Trees for the final model: the median of the best iterations."""
         return int(np.median(self.best_iters))
 
     def summary(self) -> str:
         aps = ", ".join(f"{a:.4f}" for a in self.fold_ap)
         return (
-            f"PR-AUC por fold: [{aps}] | media={np.mean(self.fold_ap):.4f} "
-            f"| n_estimators (mediana)={self.n_estimators}"
+            f"PR-AUC per fold: [{aps}] | mean={np.mean(self.fold_ap):.4f} "
+            f"| n_estimators (median)={self.n_estimators}"
         )
 
 
@@ -89,11 +85,11 @@ def cv_lightgbm(
     num_boost_round: int = 5000,
     early_stopping_rounds: int = 200,
 ) -> CVResult:
-    """CV de ventana expansiva (design.md §4.3) con early stopping por fold.
+    """Expanding-window CV (design.md §4.4) with early stopping per fold.
 
-    `folds` viene de `fraudq.data.split.expanding_window_folds`. El propósito es
-    doble: (a) PR-AUC honesto fuera de muestra dentro de train, (b) elegir
-    n_estimators para el ajuste final sin tocar calib/test.
+    `folds` comes from `fraudq.data.split.expanding_window_folds`. The purpose
+    is twofold: an honest out-of-sample PR-AUC inside train, and a choice of
+    n_estimators for the final fit without touching calib or test.
     """
     import lightgbm as lgb
     from sklearn.metrics import average_precision_score
@@ -130,10 +126,10 @@ def train_final_lgbm(
     n_estimators: int,
     target: str = "isFraud",
 ):
-    """Ajuste final sobre TODO train (0-119) con n_estimators fijado por la CV.
+    """Final fit over ALL of train (0 to 119) with n_estimators fixed by the CV.
 
-    Sin early stopping aquí: no hay conjunto de validación legítimo que no sea
-    del futuro, y ese fue exactamente el trabajo de la CV.
+    No early stopping here: there is no legitimate validation set that is not
+    from the future, and settling that was exactly the CV's job.
     """
     import lightgbm as lgb
 
@@ -151,14 +147,14 @@ def train_logistic_baseline(
     feature_cols: list[str],
     target: str = "isFraud",
 ):
-    """Regresión logística: el baseline honesto (design.md §7.1).
+    """Logistic regression: the honest baseline (design.md §6.1).
 
-    Pipeline imputación (mediana) -> escalado -> logística. `class_weight=None`
-    explícito: el mismo principio de no-rebalanceo aplica al baseline, o la
-    comparación de calibraciones del Día 5 no sería justa.
+    A pipeline of median imputation, then scaling, then the logistic model.
+    `class_weight=None` is explicit: the same no-resampling principle applies to
+    the baseline, or the calibration comparison would not be fair.
 
-    Úsala con un conjunto PEQUEÑO de features numéricas; el punto es tener una
-    referencia, no competir con LightGBM.
+    Use it with a SMALL set of numeric features. The point is a reference
+    point, not competing with LightGBM.
     """
     from sklearn.impute import SimpleImputer
     from sklearn.linear_model import LogisticRegression
@@ -177,7 +173,7 @@ def train_logistic_baseline(
 
 
 def predict_scores(model, df: pd.DataFrame, feature_cols: list[str]) -> np.ndarray:
-    """Scores en [0,1] con interfaz uniforme para ambos modelos."""
+    """Scores in [0,1], one uniform interface for both models."""
     if hasattr(model, "predict_proba"):  # sklearn Pipeline
         return model.predict_proba(df[feature_cols])[:, 1]
     return model.predict(df[feature_cols])  # lgb.Booster

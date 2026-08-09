@@ -1,9 +1,10 @@
-"""Feature engineering para fraud-review-queue.
+"""Feature engineering.
 
-Orden de construcción (importa por el test de leakage, ver tests/):
-1. `uid.add_uid`       — entity resolution: reconstruye el identificador de cliente.
-2. `build.build_features` — agregados **estrictamente retrospectivos** sobre el UID.
+Build order, which matters for the leakage test in tests/:
 
-El invariante del subpaquete: ninguna feature mira el presente ni el futuro.
-Se codifica en `tests/test_no_future_leakage.py`.
+1. `uid.add_uid`, entity resolution: it reconstructs the customer identifier.
+2. `build.build_features`, **strictly backward-looking** aggregates over the UID.
+
+The invariant of this subpackage: no feature looks at the present or the
+future. It is encoded in `tests/test_no_future_leakage.py`.
 """

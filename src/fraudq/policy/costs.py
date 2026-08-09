@@ -1,23 +1,23 @@
-"""La capa de decisión: costo esperado de cada acción y valor de la revisión.
+"""The decision layer: expected cost of each action, and the value of a review.
 
-Aquí se convierten en numpy las derivaciones de `docs/design.md` §2. Es el núcleo
-del proyecto: todo lo demás (la asignación, la simulación, la API, el simulador de
-cola) consume estas cinco funciones.
+This is where the derivations of `docs/design.md` §2 become numpy. It is the
+core of the project: everything else, the allocation, the simulation, the API
+and the queue simulator, consumes these five functions.
 
-Contrato, asumido por `allocate.py`, `simulate.py`, `policies.py`, la API y el
-Streamlit:
+The contract, assumed by `allocate.py`, `simulate.py`, `policies.py`, the API
+and the Streamlit app:
 
-- `cfg` es duck-typed con los atributos `F`, `m`, `phi` y `r`. `CostConfig` de
-  `config.py` los expone como alias de sus campos; en los tests basta un
-  `SimpleNamespace`.
-- Todas las funciones aceptan escalares o arrays de numpy y devuelven lo mismo.
-  Vectorizadas con `np.minimum` y `np.where`, sin bucles.
-- `cfg` llega SIEMPRE como argumento, nunca de un global. Es el invariante 8 de
-  `docs/design.md`: una función que alcanza `CONFIG` por su cuenta ignora en
-  silencio el barrido del análisis de sensibilidad, y falla sin levantar nada.
+- `cfg` is duck-typed with the attributes `F`, `m`, `phi` and `r`. `CostConfig`
+  in `config.py` exposes them as aliases of its fields; in the tests a
+  `SimpleNamespace` is enough.
+- Every function takes scalars or numpy arrays and returns the same. They are
+  vectorised with `np.minimum` and `np.where`, with no loops.
+- `cfg` ALWAYS arrives as an argument, never from a global. That is invariant 8
+  of `docs/design.md`: a function that reaches for `CONFIG` on its own silently
+  ignores the sensitivity sweep, and fails without raising anything.
 
-La especificación ejecutable es `tests/test_cost_functions.py`, cuyos casos están
-calculados a mano.
+The executable specification is `tests/test_cost_functions.py`, whose cases are
+worked out by hand.
 """
 
 from __future__ import annotations
@@ -26,80 +26,79 @@ import numpy as np
 
 
 def cost_approve(p, amt, cfg):
-    """Costo esperado de APROBAR la transacción (design.md §2.2, fila 1).
+    """Expected cost of APPROVING the transaction (design.md §2.2, first row).
 
-    Si era fraude (probabilidad ``p``), el emisor revierte el cargo: se pierde el
-    monto completo más la comisión fija de chargeback. Si era legítima, no cuesta
-    nada.
+    If it was fraud, with probability ``p``, the issuer reverses the charge: the
+    full amount is lost plus the fixed chargeback fee. If it was legitimate, it
+    costs nothing.
 
-        E[costo | approve] = p * (amt + F)
+        E[cost | approve] = p * (amt + F)
     """
     return p * (amt + cfg.F)
 
 
 def cost_block(p, amt, cfg):
-    """Costo esperado de BLOQUEAR la transacción (design.md §2.2, fila 2).
+    """Expected cost of BLOCKING the transaction (design.md §2.2, second row).
 
-    Si era legítima (probabilidad ``1 - p``), se pierde el margen bruto de esa
-    venta más el costo de fricción: soporte, y la parte del churn que provoca. Si
-    era fraude, bloquear no cuesta nada: se evitó la pérdida.
+    If it was legitimate, with probability ``1 - p``, the gross margin on that
+    sale is lost plus the friction cost: support, and the share of churn it
+    causes. If it was fraud, blocking costs nothing: the loss was avoided.
 
-        E[costo | block] = (1 - p) * (m * amt + phi)
+        E[cost | block] = (1 - p) * (m * amt + phi)
     """
     return (1.0 - p) * (cfg.m * amt + cfg.phi)
 
 
 def value_of_review(p, amt, cfg):
-    """Valor de mandar la transacción a un humano (design.md §2.5).
+    """Value of sending the transaction to a human (design.md §2.3).
 
-    La reducción de costo esperado respecto de la MEJOR acción automática,
-    asumiendo que la revisión resuelve el caso correctamente a un costo ``r``:
+    The expected-cost reduction against the BEST automatic action, assuming the
+    review resolves the case correctly at a cost of ``r``:
 
         V = min( cost_approve, cost_block ) - r
 
-    Puede ser NEGATIVO, y ese signo es la tesis entera del proyecto en una
-    desigualdad: revisar un caso que el sistema ya tiene decidido cuesta ``r`` y no
-    compra nada. ``V`` se maximiza en probabilidades MODERADAS, en ``p_star``, y
-    crece con el monto.
+    It can be NEGATIVE, and that sign is the whole thesis of the project in one
+    inequality: reviewing a case the system has already decided costs ``r`` and
+    buys nothing. ``V`` is maximised at MODERATE probabilities, at ``p_star``,
+    and grows with the amount.
     """
     return np.minimum(cost_approve(p, amt, cfg), cost_block(p, amt, cfg)) - cfg.r
 
 
 def realized_cost(actions, is_fraud, amt, cfg):
-    """Costo REALIZADO de cada acción, dado el desenlace verdadero.
+    """REALISED cost of each action, given the true outcome.
 
-    Es la contraparte contable de las funciones de arriba: las esperadas deciden,
-    esta liquida. La usa `simulate.py` para evaluar políticas contra etiquetas
-    reales (en calibración para fijar umbrales; en test una sola vez).
+    This is the accounting counterpart of the functions above: the expected
+    costs decide, this one settles. `simulate.py` uses it to evaluate policies
+    against real labels, on calibration to fit thresholds and on test once.
 
-    | acción    | fraude (y=1)    | legítima (y=0)     |
+    | action    | fraud (y=1)     | legitimate (y=0)   |
     |-----------|-----------------|--------------------|
     | approve   | amt + F         | 0                  |
     | block     | 0               | m*amt + phi        |
     | review    | r               | r                  |
 
-    Revisar cuesta ``r`` pase lo que pase: el supuesto de §2.2 es que el analista
-    resuelve el caso, así que no se incurre en la pérdida de ninguna de las dos
-    columnas.
+    A review costs ``r`` whatever happens: the assumption in §2.2 is that the
+    analyst resolves the case, so neither column's loss is incurred.
 
     Parameters
     ----------
     actions:
-        Array de strings con valores exactos "approve", "review" o "block".
+        Array of strings, exactly "approve", "review" or "block".
     is_fraud:
-        Etiqueta verdadera, 0 o 1, alineada con ``actions``.
+        True label, 0 or 1, aligned with ``actions``.
     amt:
-        Montos, alineados con ``actions``.
+        Amounts, aligned with ``actions``.
 
     Returns
     -------
-    Array de floats del mismo largo.
+    Array of floats of the same length.
 
     Raises
     ------
     ValueError
-        Si aparece una acción que no es una de las tres. Un typo silencioso aquí
-        contaminaría la contabilidad de una política entera.
+        If an action turns up that is none of the three. A silent typo here
+        would contaminate the accounting of an entire policy.
     """
     actions = np.asarray(actions, dtype=object)
     y = np.asarray(is_fraud, dtype=float)
@@ -111,7 +110,7 @@ def realized_cost(actions, is_fraud, amt, cfg):
 
     unknown = ~(is_approve | is_block | is_review)
     if np.any(unknown):
-        raise ValueError(f"Acciones desconocidas: {sorted(set(np.asarray(actions)[unknown]))}")
+        raise ValueError(f"Unknown actions: {sorted(set(np.asarray(actions)[unknown]))}")
 
     return np.where(
         is_approve,
@@ -121,19 +120,19 @@ def realized_cost(actions, is_fraud, amt, cfg):
 
 
 def p_star(amt, cfg):
-    """La probabilidad donde ``value_of_review`` es máxima (design.md §2.6).
+    """The probability at which ``value_of_review`` is highest (design.md §2.4).
 
-    ``V`` es el mínimo entre una recta creciente en ``p`` (aprobar) y una
-    decreciente (bloquear), menos una constante. El mínimo de las dos se maximiza
-    justo donde se cruzan:
+    ``V`` is the minimum of a line increasing in ``p`` (approve) and a
+    decreasing one (block), minus a constant. That minimum is maximised exactly
+    where the two cross:
 
         p * (a + F) = (1 - p) * (m*a + phi)
         p_star = (m*a + phi) / ( (a + F) + (m*a + phi) )
 
-    Ronda 0.2-0.3 y depende poco del monto, que es la razón por la que rankear la
-    cola por score concentra a los analistas donde menos aportan. Ningún consumidor
-    de producción la necesita: la usa el notebook de resultados para anotar la
-    figura de regiones de decisión.
+    It sits around 0.2 to 0.3 and depends little on the amount, which is why
+    ranking the queue by score concentrates analysts where they add least. No
+    production consumer needs it: the results notebook uses it to annotate the
+    decision-region figure.
     """
     blocked = cfg.m * amt + cfg.phi
     return blocked / ((amt + cfg.F) + blocked)
