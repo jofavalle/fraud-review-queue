@@ -29,6 +29,7 @@ models/artifacts/
 # renders them.
 reports/*.parquet
 reports/*.csv
+reports/*.json
 
 # System
 .DS_Store

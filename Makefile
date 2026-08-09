@@ -1,6 +1,6 @@
-# make data | pipeline | smoke | test | lint | app | api | docker  (design.md §9)
+# make data | pipeline | analysis | smoke | test | lint | app | api | docker  (design.md §9)
 
-.PHONY: data pipeline smoke test lint app api docker docker-run
+.PHONY: data pipeline analysis smoke test lint app api docker docker-run
 
 data:            ## Descarga IEEE-CIS y convierte a Parquet
 	./scripts/download_data.sh
@@ -8,6 +8,9 @@ data:            ## Descarga IEEE-CIS y convierte a Parquet
 
 pipeline:        ## La cadena completa sobre los datos reales (necesita `make data`)
 	python -m fraudq.pipeline
+
+analysis:        ## Sensitivity sweep and drift, off the persisted scoring (needs `make pipeline`)
+	python -m fraudq.analysis
 
 smoke:           ## La misma cadena sobre datos sintéticos, sin Kaggle y en segundos
 	python -m fraudq.pipeline --synthetic
