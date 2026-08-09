@@ -97,13 +97,25 @@ re-evaluates the test partition**, which is what keeps the single-look rule
 (`docs/design.md` §9, invariant 5) true in practice rather than in principle.
 
 Varying a cost parameter does not re-score anything: predictions are already
-made, and only the decision layer changes.
+made, and only the decision layer changes. That is why the sweep takes 20
+seconds against the pipeline's 15 minutes.
 
 ```bash
+uv run python -m fraudq.analysis                # sweep and drift into reports/
 uv run jupyter lab notebooks/03_results.ipynb   # figures into reports/figures/
 uv run streamlit run app/streamlit_app.py       # queue simulator
 uv run uvicorn fraudq.api.main:app --port 8000  # scoring endpoint
 ```
+
+`fraudq.analysis` writes `sensitivity_tornado.csv`, `drift_by_week.csv` and
+`analysis_summary.json`, and the notebook reads all three. Run it before the
+notebook: three of the six figures have nothing to draw otherwise.
+
+One subtlety worth knowing before reading the code. `run_pipeline` fits the
+single-threshold policy on calib and prints the threshold without persisting it,
+so `fraudq.analysis` refits it from `scored_calib.parquet`. The grid is fixed and
+the tie-break is deterministic, so this reproduces the pipeline's value exactly
+rather than approximating it, and nothing has to be re-run to recover it.
 
 ## 5. Container
 

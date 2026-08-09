@@ -3,8 +3,9 @@
 **Cost-optimal allocation of a capacity-constrained fraud review queue.**
 
 > **Status: results measured (August 2026).** The design is fixed, the pipeline
-> runs end to end on the real data, and the numbers below come from a single
-> scoring of the held-out test partition. The sensitivity sweep is next.
+> runs end to end on the real data, the numbers below come from a single scoring
+> of the held-out test partition, and the sensitivity sweep is done: the
+> conclusion holds across the full assumed range of every cost parameter.
 > Full spec in `docs/design.md`.
 
 ---
@@ -38,6 +39,12 @@ deciding it automatically.
 `V` peaks at **moderate** probabilities and grows with the amount. Ranking by
 score concentrates analysts where the system is already confident, and where a
 human therefore adds little. **This project measures what that costs.**
+
+![Decision regions over probability and amount, beside where the test data actually falls](reports/figures/fig4_regions_and_joint_distribution.png)
+
+The left panel is the decision boundary the cost model implies: it bends with
+the amount, which is why a single threshold on the score cannot trace it. The
+right panel is where the transactions actually are.
 
 Derivations, assumptions, and project invariants: `docs/design.md`.
 
@@ -86,7 +93,9 @@ row inside the truncation. Honest features cannot tell the difference.
 
 *Held-out test partition: days 156 to 182, 75,190 transactions, 2,655 of them
 fraudulent. Scored once. Review capacity is 1 % of each day's volume, which on
-this partition is 737 reviews per day.*
+this partition is 20 to 32 reviews a day and 737 across the window.*
+
+![Expected loss per $1,000 of volume under four policies](reports/figures/fig1_policy_comparison.png)
 
 | Policy | Expected loss / $1k volume | Fraud caught | Fraud missed | Legit blocked |
 |---|---|---|---|---|
@@ -97,11 +106,17 @@ this partition is 737 reviews per day.*
 
 **Ranking the queue by value rather than by score saves $9.56 per $1,000 of
 volume: a 29.7 % reduction in expected loss.** Both queue policies spend the
-same 737 reviews a day and both run at full utilisation, so the gap is not extra
+same 737 reviews and both run at full utilisation, so the gap is not extra
 capacity. It is the same capacity aimed at different transactions. Ranking by
 value also catches more fraud (1,343 against 1,271) while blocking fewer
 legitimate customers (939 against 1,012), which is the part a pure
 classification metric cannot see.
+
+How different are the two queues? Measured rather than asserted: they overlap by
+**0.7 %**. Almost every case a value-ranked queue sends to an analyst is one a
+score-ranked queue would never have shown them.
+
+![The two review queues over probability and amount, overlapping by 0.7 percent](reports/figures/fig5_queue_overlap.png)
 
 Note that the single threshold and the score-ranked queue are nearly tied
 ($32.36 against $32.21). Adding a capacity-constrained queue on top of a
@@ -122,19 +137,72 @@ Platt scaling won on the temporal holdout inside the calibration partition
 validation inside the training window gave a mean PR-AUC of 0.628 across four
 expanding-window folds.
 
+![Reliability of the raw score and of the calibrated probability](reports/figures/fig2_calibration_before_after.png)
+
 ---
 
 ## Sensitivity
 
 The four cost parameters (`F`, `m`, `φ`, `r`) are **assumptions, not
-measurements**. Every conclusion is tested across their plausible ranges, and
-reported as a tornado plot.
+measurements**. Each is swept across its plausible range, one at a time with the
+rest at base, over the scoring that was already persisted: varying a cost
+parameter re-scores nothing, it moves only the decision layer above predictions
+that were already made.
 
-The analysis answers two questions: whether the conclusion survives the full
-range, and which parameter dominates — i.e. what the business should measure
-next, rather than what to tune in the model.
+![Tornado plot of the saving across the assumed ranges of the four cost parameters](reports/figures/fig3_tornado.png)
 
-*In progress.*
+| Parameter | Range | Saving at low | Saving at high | Swing |
+|---|---|---|---|---|
+| `m`, gross margin | 0.15 to 0.40 | $6.60 | $10.64 | **$4.05** |
+| `F`, chargeback fee | $10 to $40 | $9.42 | $9.83 | $0.40 |
+| `φ`, friction cost | $2 to $30 | $9.58 | $9.75 | $0.18 |
+| `r`, review cost | $1 to $5 | $9.56 | $9.56 | $0.00 |
+
+**The conclusion survives the full range.** The saving is never smaller than
+$6.60 per $1,000, against $9.56 at the base assumptions. Every bar of the
+tornado sits to the right of zero, so ranking the queue by value wins under
+every combination of assumptions considered, not only the ones chosen.
+
+**Gross margin dominates, by an order of magnitude over the next parameter.**
+That is the answer to the second question `docs/design.md` §7.2 asks of this
+sweep, and it is an output of the
+analysis rather than an input: if this were a real operation, the next dollar of
+measurement effort belongs on the margin, not on the chargeback fee and not on
+the model.
+
+**Review cost does not move the result at all**, and the zero is exact rather
+than rounded. Both queue policies spend the same 737 reviews, so `r` enters both
+sides of the comparison identically and cancels. It is also a constant
+subtracted from every transaction's value of review, so it cannot reorder the
+queue either. Within its assumed range the only way it could matter is by
+pushing cases below `V > 0`, and on this data it never binds: it takes roughly
+`r = 50` before the value-ranked queue declines to spend its capacity, which is
+25 times the assumed cost of an analyst touching a case.
+
+---
+
+## Drift
+
+PR-AUC and fraud rate across the test window, in seven-day bins. The window is
+27 days, which is why they are weeks: the natural monthly binning returns a
+single point, and one point drawn as a trend line invites a reading of drift
+that was never measured.
+
+![PR-AUC week by week across the test window, against the full-window value](reports/figures/fig6_performance_by_week.png)
+
+| Week | Transactions | Fraud rate | PR-AUC |
+|---|---|---|---|
+| 0 | 19,692 | 2.84 % | 0.501 |
+| 1 | 20,996 | 3.62 % | 0.499 |
+| 2 | 19,782 | 3.70 % | 0.572 |
+| 3 | 14,720 | 4.09 % | 0.539 |
+
+Ranking quality oscillates around the full-window value of 0.526 and ends 7.6 %
+above where it started. **There is no measurable decay here, and that is a
+statement about the window rather than about the model**: 27 days is too short
+to establish a retraining cadence, which is what §7.3 wants this report for. The
+fraud rate does climb steadily, from 2.84 % to 4.09 %, which is the kind of
+movement that would matter over a longer horizon.
 
 ---
 
@@ -147,6 +215,12 @@ next, rather than what to tune in the model.
   does not model it.
 - Static capacity. Real queues have shifts, backlogs, and SLA prioritisation.
 - The data is from 2017–2018. Fraud patterns have moved.
+- **Feature drift was not measured.** `docs/design.md` §7.3 asks for PSI on the
+  top features, and `psi` and `psi_by_month` are implemented, but the persisted
+  scoring carries only identifiers, amount, label and probability. Computing PSI
+  means rebuilding all 412 features for both partitions, which is a full pipeline
+  run rather than a read of `reports/`. What is reported above is performance
+  drift, which the persisted artefacts do support.
 
 ---
 
@@ -169,13 +243,19 @@ With the real data:
 uv run python -m fraudq.data.ingest     # -> data/processed/*.parquet
 
 uv run python -m fraudq.pipeline        # features -> split -> train -> calibrate -> evaluate
+uv run python -m fraudq.analysis        # the sensitivity sweep and the drift report
 uv run streamlit run app/streamlit_app.py
 ```
 
 The pipeline writes `reports/scored_calib.parquet`, `reports/scored_test.parquet`,
 `reports/policy_comparison.csv` and `models/artifacts/`. Everything downstream —
 the sensitivity sweep, the drift report, the API and the queue simulator — reads
-those, so **the test partition is scored once and never looked at again**.
+those, so **the test partition is scored once and never looked at again**. The
+pipeline takes about 15 minutes on four cores; the analysis on top of it takes
+20 seconds, because it re-scores nothing.
+
+The figures in this README come from `notebooks/03_results.ipynb`, which reads
+the same artefacts and draws. It computes no policy of its own.
 
 The scoring API ships as a container. Model artifacts are mounted, not baked in:
 the image is the code, the model is data with its own lifecycle.
@@ -197,6 +277,7 @@ them.
 src/fraudq/
 ├── config.py           # every cost and policy assumption, in one place
 ├── pipeline.py         # the driver: chains the stages below end to end
+├── analysis.py         # sensitivity and drift, off the persisted scoring
 ├── data/               # ingest (CSV → parquet), temporal split, synthetic data
 ├── features/           # UID construction, backward-looking aggregates
 ├── models/             # training, probability calibration, artifact persistence
