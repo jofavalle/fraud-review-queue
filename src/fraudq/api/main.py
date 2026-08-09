@@ -1,34 +1,33 @@
-"""API de scoring (FastAPI) — boilerplate delegable (plan §5.3, design.md §11.1).
-
-Va en: fraud-review-queue/src/fraudq/api/main.py
+"""Scoring API (FastAPI).
 
     uvicorn fraudq.api.main:app --host 0.0.0.0 --port 8000
 
-## El contrato del endpoint /score
+## The contract of the /score endpoint
 
-Recibe una transacción (campos crudos; los que falten entran como NaN —
-LightGBM los maneja nativamente y la ausencia es señal, §3.2). Devuelve:
+It takes one transaction (raw fields; whatever is missing enters as NaN, since
+LightGBM handles that natively and absence is itself a signal, §3.2). It
+returns:
 
-    probability         — p CALIBRADA (el booster + el calibrador del Día 5)
-    value_of_review     — V con los parámetros de costo del artefacto
-    recommended_action  — approve / review / block, SIN restricción de capacidad
-    queue_position      — null en este endpoint (ver nota)
+    probability         CALIBRATED p (the booster plus the calibrator)
+    value_of_review     V under the cost parameters stored in the artefact
+    recommended_action  approve / review / block, with NO capacity constraint
+    queue_position      null on this endpoint (see the note)
 
-**Nota de honestidad sobre `queue_position`:** la cola es un concepto de LOTE
-(la capacidad se asigna por jornada contra las demás transacciones del día).
-Un endpoint de una sola transacción no tiene cohorte contra la cual rankear,
-así que devuelve null en vez de un número inventado. La acción recomendada es
-la política SIN capacidad (§2.4): review si V > 0, si no la auto más barata.
-La asignación bajo capacidad vive en policy/allocate.py y en el simulador.
+**An honest note on `queue_position`:** the queue is a BATCH concept, since
+capacity is allocated per day against the other transactions of that day. A
+single-transaction endpoint has no cohort to rank against, so it returns null
+rather than an invented number. The recommended action is the policy WITHOUT
+capacity (§2.4): review if V > 0, otherwise the cheaper automatic action.
+Allocation under capacity lives in policy/allocate.py and in the simulator.
 
-**Límite conocido (al README):** las features retrospectivas de UID exigen un
-feature store en producción; aquí se aceptan como campos opcionales del payload
-(p. ej. `uid_txn_count_prior`). Si no vienen, entran como NaN — igual que una
-transacción de un cliente nunca visto.
+**A known limit:** the backward-looking UID features need a feature store in
+production. Here they are accepted as optional payload fields (say
+`uid_txn_count_prior`). If they do not arrive they enter as NaN, exactly like a
+transaction from a customer never seen before.
 
-El modelo se carga UNA vez (lifespan), desde $FRAUDQ_MODELS_DIR (default
-`models/artifacts`). Si no hay artefactos, la API arranca igual y /score
-responde 503 — así los tests inyectan un scorer falso sin tocar disco.
+The model is loaded ONCE, on lifespan, from $FRAUDQ_MODELS_DIR (default
+`models/artifacts`). With no artefacts the API still starts and /score answers
+503, which is how the tests inject a fake scorer without touching disk.
 """
 
 from __future__ import annotations
@@ -46,8 +45,8 @@ DEFAULT_MODELS_DIR = "models/artifacts"
 
 
 class Scorer:
-    """Envuelve los artefactos persistidos. Duck-typed para los tests:
-    cualquier objeto con `.predict_p(payload) -> float` y `.cost_cfg` sirve."""
+    """Wraps the persisted artefacts. Duck-typed for the tests: any object with
+    `.predict_p(payload) -> float` and `.cost_cfg` will do."""
 
     def __init__(self, booster, calibrator, feature_cols, cost_cfg):
         self._booster = booster
@@ -76,8 +75,8 @@ async def lifespan(app: FastAPI):
     try:
         app.state.scorer = Scorer.from_dir(models_dir)
     except (FileNotFoundError, ImportError):
-        # Sin artefactos la API vive (para tests y para el health check del
-        # contenedor), pero /score lo dice claramente con un 503.
+        # With no artefacts the API still lives, for the tests and for the
+        # container health check, but /score says so plainly with a 503.
         app.state.scorer = getattr(app.state, "scorer", None)
     yield
 
@@ -90,17 +89,17 @@ app = FastAPI(
 
 
 class ScoreRequest(BaseModel):
-    """La transacción cruda. Campos extra (C1..., V1..., uid_*) se aceptan y
-    fluyen al modelo; los ausentes entran como NaN."""
+    """The raw transaction. Extra fields (C1..., V1..., uid_*) are accepted and
+    flow through to the model; the missing ones enter as NaN."""
 
     model_config = ConfigDict(extra="allow")
 
-    TransactionAmt: float = Field(gt=0, description="Monto de la transacción")
+    TransactionAmt: float = Field(gt=0, description="Transaction amount")
     TransactionDT: int | None = Field(default=None, ge=0)
 
 
 class ScoreResponse(BaseModel):
-    probability: float = Field(ge=0, le=1, description="p calibrada")
+    probability: float = Field(ge=0, le=1, description="Calibrated p")
     value_of_review: float
     recommended_action: str  # approve | review | block
     queue_position: int | None = None
@@ -123,7 +122,7 @@ def score(req: ScoreRequest) -> ScoreResponse:
     payload = req.model_dump()
     p = float(scorer.predict_p(payload))
     if not (0.0 <= p <= 1.0) or math.isnan(p):
-        # La misma guarda que simulate_queue: sin p válida, V es ficción.
+        # The same guard as simulate_queue: without a valid p, V is fiction.
         raise HTTPException(status_code=500, detail=f"Invalid probability: {p}")
 
     amt = float(req.TransactionAmt)

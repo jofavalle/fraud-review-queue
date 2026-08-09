@@ -1,26 +1,26 @@
-"""Driver del pipeline: de los parquet de la ingesta a la tabla de políticas.
+"""Pipeline driver: from the ingested parquet files to the policy table.
 
-    python -m fraudq.pipeline                 # datos reales, data/processed/
-    python -m fraudq.pipeline --synthetic     # dataset sintético, sin Kaggle
+    python -m fraudq.pipeline                 # real data, data/processed/
+    python -m fraudq.pipeline --synthetic     # synthetic dataset, no Kaggle
 
-Encadena lo que los módulos de `src/fraudq/` hacen por separado:
+It chains what the modules under `src/fraudq/` do separately:
 
-    features -> split temporal -> CV -> entrenamiento -> calibración
-             -> scoring -> umbral en calib -> comparación de políticas en test
+    features -> temporal split -> CV -> training -> calibration
+             -> scoring -> threshold on calib -> policy comparison on test
 
-y deja en disco los artefactos que consumen el notebook de resultados, el
-simulador de cola y la API:
+and leaves on disk the artefacts consumed by the results notebook, the queue
+simulator and the API:
 
-    reports/scored_calib.parquet     scores y p sobre la partición de calibración
-    reports/scored_test.parquet      idem sobre test, tras la única evaluación
-    reports/policy_comparison.csv    la tabla de las cuatro políticas
-    models/artifacts/                booster, calibrador y metadatos
+    reports/scored_calib.parquet     scores and p over the calibration partition
+    reports/scored_test.parquet      the same over test, after the single look
+    reports/policy_comparison.csv    the table of the four policies
+    models/artifacts/                booster, calibrator and metadata
 
-Sobre la partición de test: se toca UNA vez, al final, y el resultado se
-persiste inmediatamente. El análisis de sensibilidad y el de drift trabajan
-sobre ese parquet y no vuelven a mirarla. Volver a correr este script sobre los
-mismos datos es legítimo; usar el número de test para elegir un hiperparámetro,
-un umbral o un supuesto de costo no lo es (`docs/design.md` §9, invariante 5).
+On the test partition: it is touched ONCE, at the end, and the result is
+persisted immediately. The sensitivity analysis and the drift report work off
+that parquet and never look at it again. Rerunning this script over the same
+data is legitimate; using the test number to pick a hyperparameter, a threshold
+or a cost assumption is not (`docs/design.md` §9, invariant 5).
 """
 
 from __future__ import annotations
@@ -46,15 +46,15 @@ from fraudq.models.calibrate import (
 from fraudq.models.persist import save_artifacts
 from fraudq.models.train import cv_lightgbm, predict_scores, train_final_lgbm
 
-#: Salidas del pipeline. `config.py` define FIGURES_DIR = reports/figures, así que
-#: reports/ es su padre; los artefactos del modelo cuelgan de models/.
+#: Pipeline outputs. `config.py` defines FIGURES_DIR = reports/figures, so
+#: reports/ is its parent; the model artefacts hang off models/.
 REPORTS_DIR = FIGURES_DIR.parent
 ARTIFACTS_DIR = MODELS_DIR / "artifacts"
 
-#: Columnas que nunca son features: identificadores, el target y las que solo
-#: sirven para particionar. `uid` queda fuera a propósito: es una llave de
-#: agrupación, y meterla como número sería darle al modelo un identificador de
-#: cliente en crudo.
+#: Columns that are never features: identifiers, the target, and the ones that
+#: only exist to partition. `uid` is left out deliberately: it is a grouping
+#: key, and feeding it in as a number would hand the model a raw customer
+#: identifier.
 _NOT_FEATURES = frozenset({"TransactionID", "isFraud", "TransactionDT", "day", "uid"})
 
 _LGBM_PARAM_FIELDS = (
@@ -69,11 +69,11 @@ _LGBM_PARAM_FIELDS = (
 
 
 def lgbm_params(model_cfg) -> dict:
-    """Traduce `ModelConfig` a los parámetros que entiende LightGBM.
+    """Translate `ModelConfig` into the parameters LightGBM understands.
 
-    Se pasan explícitos y no con `asdict`: `n_estimators`, `metric` y
-    `calibration_method` gobiernan el flujo, no el booster, y colarlos en el
-    diccionario haría que LightGBM los ignorase en silencio.
+    They are passed explicitly rather than through `asdict`: `n_estimators`,
+    `metric` and `calibration_method` govern the flow, not the booster, and
+    slipping them into the dictionary would have LightGBM ignore them silently.
     """
     params = {f: getattr(model_cfg, f) for f in _LGBM_PARAM_FIELDS}
     params["seed"] = model_cfg.random_state
@@ -82,18 +82,18 @@ def lgbm_params(model_cfg) -> dict:
 
 
 def select_feature_columns(df: pd.DataFrame) -> list[str]:
-    """Todas las columnas numéricas que no son identificador ni target."""
+    """Every numeric column that is neither an identifier nor the target."""
     return [
         c for c in df.columns if c not in _NOT_FEATURES and pd.api.types.is_numeric_dtype(df[c])
     ]
 
 
 def prepare(df_raw: pd.DataFrame, cfg: Config) -> tuple[dict[str, pd.DataFrame], list[str]]:
-    """Features y partición temporal.
+    """Features and temporal split.
 
-    El encoder de frecuencia se ajusta SOLO sobre train y se aplica a las cuatro
-    particiones: es lo que impide que la distribución de calibración y test se
-    filtre a la representación con la que se entrena.
+    The frequency encoder is fitted on train ONLY and applied to all four
+    partitions: that is what stops the calibration and test distributions from
+    leaking into the representation the model is trained on.
     """
     feats = build_features(df_raw)
     df = df_raw.merge(
@@ -113,7 +113,7 @@ def prepare(df_raw: pd.DataFrame, cfg: Config) -> tuple[dict[str, pd.DataFrame],
 
 
 def train(parts: dict[str, pd.DataFrame], feature_cols: list[str], cfg: Config, valid_len: int):
-    """CV de ventana expansiva para fijar n_estimators, y ajuste final."""
+    """Expanding-window CV to fix n_estimators, then the final fit."""
     folds = expanding_window_folds(
         cfg.split.train_end_day, n_folds=cfg.split.n_cv_folds, valid_len=valid_len
     )
@@ -126,12 +126,12 @@ def train(parts: dict[str, pd.DataFrame], feature_cols: list[str], cfg: Config, 
 
 
 def calibrate(booster, parts: dict[str, pd.DataFrame], feature_cols: list[str], holdout_days: int):
-    """Elige calibrador en un holdout temporal de calib y lo reajusta sobre todo calib.
+    """Pick a calibrator on a temporal holdout of calib, then refit it on all of calib.
 
-    El calibrador se ajusta solo con datos que el modelo no vio nunca
-    (`docs/design.md` §4.3). Toda la capa de costos depende de que ``p`` sea una
-    probabilidad de verdad: un modelo sobreconfiado hace que la política
-    "óptima" deje de serlo.
+    The calibrator is fitted only on data the model never saw
+    (`docs/design.md` §4.3). The whole cost layer depends on ``p`` being a real
+    probability: with an overconfident model, the "optimal" policy stops being
+    optimal.
     """
     fit_df, hold_df = temporal_calibration_split(parts["calib"], holdout_days=holdout_days)
     fit_scores = predict_scores(booster, fit_df, feature_cols)
@@ -140,16 +140,16 @@ def calibrate(booster, parts: dict[str, pd.DataFrame], feature_cols: list[str], 
     table = compare_calibrators(fit_scores, fit_df["isFraud"], hold_scores, hold_df["isFraud"])
     print(table.to_string(float_format=lambda v: f"{v:.5f}"))
 
-    # Se compara sobre el holdout y se elige por Brier, que penaliza a la vez
-    # calibración y discriminación.
+    # The comparison runs on the holdout and the winner is picked by Brier,
+    # which penalises calibration and discrimination at once.
     winner = str(table["brier"].idxmin()) if "brier" in table.columns else "isotonic"
     if winner == "raw":
-        # Puede pasar y no es un fallo: significa que el score ya estaba bien
-        # calibrado. Se usa el isotónico igualmente para tener un objeto con la
-        # misma interfaz aguas abajo, y queda constancia en la salida.
-        print("  El score crudo gana en Brier; se usa isotónica por uniformidad de interfaz.")
+        # This can happen and is not a failure: it means the raw score was
+        # already well calibrated. Isotonic is used anyway so that downstream
+        # code gets an object with the same interface, and the output says so.
+        print("  Raw score wins on Brier; using isotonic for a uniform interface.")
         winner = "isotonic"
-    print(f"  Calibrador elegido: {winner}")
+    print(f"  Calibrator chosen: {winner}")
 
     calib_scores = predict_scores(booster, parts["calib"], feature_cols)
     fit_fn = fit_platt if winner == "platt" else fit_isotonic
@@ -173,30 +173,30 @@ def run_pipeline(
     valid_len: int = 20,
     holdout_days: int = 6,
 ) -> dict:
-    """Corre la cadena completa y devuelve las cifras de cabecera."""
+    """Run the whole chain and return the headline figures."""
     reports_dir.mkdir(parents=True, exist_ok=True)
 
-    print("[1/6] Features y partición temporal")
+    print("[1/6] Features and temporal split")
     parts, feature_cols = prepare(df_raw, cfg)
     for name, part in parts.items():
-        print(f"  {name:>8}: {len(part):>7,} filas, días {part['day'].min()}-{part['day'].max()}")
+        print(f"  {name:>8}: {len(part):>7,} rows, days {part['day'].min()}-{part['day'].max()}")
     print(f"  {len(feature_cols)} features")
 
-    print("[2/6] Entrenamiento")
+    print("[2/6] Training")
     booster, cv = train(parts, feature_cols, cfg, valid_len)
 
-    print("[3/6] Calibración")
+    print("[3/6] Calibration")
     calibrator, calib_scores, calib_table = calibrate(booster, parts, feature_cols, holdout_days)
 
-    print("[4/6] Scoring de calibración")
+    print("[4/6] Scoring the calibration partition")
     p_calib = calibrator.predict(calib_scores)
     scored_calib = _scored_frame(parts["calib"], calib_scores, p_calib)
     scored_calib.to_parquet(reports_dir / "scored_calib.parquet", index=False)
 
     threshold = fit_single_threshold(scored_calib, cfg.cost)
-    print(f"  Umbral de la política de score único, ajustado en calib: {threshold:.4f}")
+    print(f"  Single-threshold policy, threshold fitted on calib: {threshold:.4f}")
 
-    print("[5/6] Evaluación en test (la única mirada)")
+    print("[5/6] Evaluation on test (the single look)")
     test_scores = predict_scores(booster, parts["test"], feature_cols)
     p_test = calibrator.predict(test_scores)
     scored_test = _scored_frame(parts["test"], test_scores, p_test)
@@ -217,11 +217,11 @@ def run_pipeline(
 
     savings = headline_savings(comparison)
     print(
-        f"  Ahorro de rankear por valor frente a rankear por score: "
-        f"{savings['savings_per_1k']:.4f} por cada $1,000"
+        f"  Saving from ranking by value rather than by score: "
+        f"{savings['savings_per_1k']:.4f} per $1,000"
     )
 
-    print("[6/6] Artefactos")
+    print("[6/6] Artefacts")
     artifacts = save_artifacts(models_dir, booster, calibrator, feature_cols, cfg.cost)
     print(f"  {artifacts}")
 
@@ -237,20 +237,20 @@ def run_pipeline(
 
 
 def load_processed(processed_dir: Path) -> pd.DataFrame:
-    """Carga el parquet de la ingesta, con identity unida si existe."""
+    """Load the ingested parquet, joined with identity if it is there."""
     transactions = processed_dir / "transactions.parquet"
     if not transactions.exists():
         raise SystemExit(
-            f"No encuentro {transactions}.\n"
-            "Ejecuta antes:  ./scripts/download_data.sh  &&  python -m fraudq.data.ingest\n"
-            "O prueba la cadena sin datos reales:  python -m fraudq.pipeline --synthetic"
+            f"{transactions} not found.\n"
+            "Run first:  ./scripts/download_data.sh  &&  python -m fraudq.data.ingest\n"
+            "Or try the chain without real data:  python -m fraudq.pipeline --synthetic"
         )
     df = pd.read_parquet(transactions)
 
     identity = processed_dir / "identity.parquet"
     if identity.exists():
-        # Left join y se conservan los nulos: la ausencia de datos de identidad
-        # es en sí misma una señal, y LightGBM trata NaN de forma nativa.
+        # Left join, nulls kept: the absence of identity data is itself a
+        # signal, and LightGBM handles NaN natively.
         df = df.merge(pd.read_parquet(identity), on="TransactionID", how="left")
     return df
 
@@ -260,7 +260,7 @@ def main() -> None:
     parser.add_argument(
         "--synthetic",
         action="store_true",
-        help="Usa transacciones sintéticas en vez de los parquet de data/processed.",
+        help="Use synthetic transactions instead of the parquet files in data/processed.",
     )
     parser.add_argument("--processed-dir", type=Path, default=DATA_PROCESSED)
     parser.add_argument("--reports-dir", type=Path, default=REPORTS_DIR)
@@ -271,14 +271,14 @@ def main() -> None:
     valid_len = 20
 
     if args.synthetic:
-        print("Dataset SINTÉTICO: verifica que la cadena corre, no produce resultados.\n")
+        print("SYNTHETIC dataset: it proves the chain runs, it produces no results.\n")
         df_raw = make_synthetic_transactions()
-        # El split de producción no cabe en un dataset de pocos días.
+        # The production split does not fit a dataset of a handful of days.
         cfg = dataclasses.replace(cfg, split=dataclasses.replace(cfg.split, **SYNTHETIC_SPLIT))
         valid_len = 10
     else:
         df_raw = load_processed(args.processed_dir)
-        print(f"{len(df_raw):,} transacciones desde {args.processed_dir}\n")
+        print(f"{len(df_raw):,} transactions from {args.processed_dir}\n")
 
     run_pipeline(
         df_raw,

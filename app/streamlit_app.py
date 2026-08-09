@@ -1,17 +1,15 @@
-"""El simulador de cola (Streamlit) — layout delegable (plan §5.3, design.md §11.4).
-
-Va en: fraud-review-queue/app/streamlit_app.py
+"""The queue simulator (Streamlit).
 
     streamlit run app/streamlit_app.py
 
-**Este es el demo que hace que alguien te escriba.** Controles: K, F, m, φ, r.
-Salidas: pérdida por $1,000, fraudes atrapados/perdidos, legítimas bloqueadas,
-EL AHORRO contra la cola rankeada por score, y el mapa de regiones (p, monto).
+Controls: K, F, m, phi, r. Outputs: loss per $1,000, frauds caught and missed,
+legitimate transactions blocked, THE SAVING against the score-ranked queue, and
+the map of decision regions in the (p, amount) plane.
 
-Consume el scoring PERSISTIDO del Día 6 (reports/scored_test.parquet): las
-predicciones están congeladas; los sliders mueven SOLO la capa de decisión.
-Explorar aquí es legítimo — el número del README sale del protocolo del Día 6
-con los parámetros base de config.py, no de este demo (§13.5).
+It consumes the PERSISTED scoring (reports/scored_test.parquet): the
+predictions are frozen and the sliders move ONLY the decision layer. Exploring
+here is legitimate. The number in the README comes from the single evaluation
+on test with the base parameters of config.py, not from this demo.
 """
 
 from __future__ import annotations
@@ -33,10 +31,10 @@ from fraudq.policy.costs import cost_approve, cost_block, value_of_review
 DEFAULT_DATA = "reports/scored_test.parquet"
 
 st.set_page_config(page_title="Fraud review queue simulator", layout="wide")
-st.title("Fraud review queue — capacity-constrained simulator")
+st.title("Fraud review queue: a capacity-constrained simulator")
 st.caption(
-    "Predictions are frozen (scored once, day 6). Sliders move only the "
-    "decision layer: cost assumptions and review capacity."
+    "Predictions are frozen, scored once on the test partition. Sliders move "
+    "only the decision layer: cost assumptions and review capacity."
 )
 
 
@@ -46,7 +44,7 @@ def load_scored(path: str) -> pd.DataFrame:
     needed = {"day", "TransactionAmt", "isFraud", "p"}
     missing = needed - set(df.columns)
     if missing:
-        raise ValueError(f"El parquet no trae {sorted(missing)} — ¿es el del Día 6?")
+        raise ValueError(f"The parquet is missing {sorted(missing)}. Is it the scored one?")
     return df
 
 
@@ -68,15 +66,15 @@ cfg = SimpleNamespace(F=F, m=m, phi=phi, r=r)
 
 if not Path(data_path).exists():
     st.warning(
-        f"No encuentro `{data_path}`. Corre la evaluación del Día 6 y persiste "
-        "el scoring (README-dia-6). El demo necesita ese archivo."
+        f"`{data_path}` not found. Run `python -m fraudq.pipeline`, which "
+        "persists the scoring. The demo needs that file."
     )
     st.stop()
 
 df = load_scored(data_path)
 
 
-# ------------------------------------------------------------- simulación
+# ---------------------------------------------------------------- simulation
 @st.cache_data(show_spinner="Simulating four policies…")
 def run(F: float, m: float, phi: float, r: float, k_pct: float) -> tuple:
     cfg = SimpleNamespace(F=F, m=m, phi=phi, r=r)
@@ -89,7 +87,7 @@ comparison, savings, threshold = run(F, m, phi, r, k_pct)
 by_value = comparison.loc["topk_by_value"]
 by_score = comparison.loc["topk_by_score"]
 
-# ------------------------------------------------------ el número protagonista
+# ------------------------------------------------------------ the headline number
 st.subheader("What score-ranking leaves on the table")
 c1, c2, c3, c4 = st.columns(4)
 c1.metric(
@@ -130,7 +128,7 @@ st.caption(
     "each parameter change (it is the naive competitor, so it gets to adapt too)."
 )
 
-# ------------------------------------------- regiones de decisión en (p, a)
+# --------------------------------------------- decision regions in (p, amount)
 st.subheader("Decision regions in the (probability, amount) plane")
 
 col_fig, col_txt = st.columns([2, 1])
@@ -144,7 +142,7 @@ with col_fig:
     approve_c = cost_approve(P, A, cfg)
     block_c = cost_block(P, A, cfg)
     v = value_of_review(P, A, cfg)
-    # 0=approve, 1=review (V>0, sin restricción §2.4), 2=block
+    # 0=approve, 1=review (V>0, no capacity constraint, §2.4), 2=block
     region = np.where(v > 0, 1, np.where(approve_c <= block_c, 0, 2))
 
     fig, ax = plt.subplots(figsize=(7, 4.5))
@@ -166,18 +164,18 @@ with col_fig:
 
 with col_txt:
     st.markdown(
-        "- Las fronteras **dependen del monto**: un umbral único sobre el "
-        "score es estructuralmente la política equivocada (§2.4).\n"
-        "- La región amarilla es donde un humano aporta; bajo capacidad "
-        "finita, la cola toma los **V más altos** de esa región.\n"
-        "- Mueve φ o r y mira la región de revisión respirar — eso es el "
-        "análisis de sensibilidad, en vivo."
+        "- The boundaries **depend on the amount**: a single threshold on the "
+        "score is structurally the wrong policy (§2.4).\n"
+        "- The yellow region is where a human adds something; under finite "
+        "capacity, the queue takes the **highest V** inside it.\n"
+        "- Move phi or r and watch the review region breathe. That is the "
+        "sensitivity analysis, live."
     )
 
-# ---------------------------------------------------------------- por día
-st.subheader("Daily realized cost — value-ranked vs. score-ranked")
-# compare_policies devuelve el resumen; para la serie diaria re-simulamos las
-# dos colas que importan:
+# ----------------------------------------------------------------- by day
+st.subheader("Daily realised cost: value-ranked against score-ranked")
+# compare_policies returns the summary; for the daily series the two queues
+# that matter are simulated again.
 from fraudq.evaluate.policies import actions_topk_by_score, actions_topk_by_value  # noqa: E402
 from fraudq.policy.simulate import simulate_queue  # noqa: E402
 

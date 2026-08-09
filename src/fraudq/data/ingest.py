@@ -1,23 +1,21 @@
-"""Ingesta CSV -> Parquet con DuckDB.
+"""CSV -> Parquet ingestion with DuckDB.
 
-Va en: fraud-review-queue/src/fraudq/data/ingest.py
+Converts the two IEEE-CIS train tables to Parquet and derives the relative time
+columns (`day`, `hour`) from `TransactionDT`. No calendar dates:
+`TransactionDT` is an offset in seconds (design.md §3.3).
 
-Convierte las dos tablas de train de IEEE-CIS a Parquet y deriva las columnas
-de tiempo relativo (`day`, `hour`) desde `TransactionDT`. Nada de fechas de
-calendario: `TransactionDT` es un offset en segundos (design.md §3.3).
+Why DuckDB and not pandas:
+  - It never loads the ~590k x 430 columns into memory; it streams CSV->Parquet.
+  - `sample_size=-1` forces a scan of every row to infer types. Many columns
+    are sparse, and a short sample would type them wrongly.
+  - Parquet comes out columnar and compressed, so the EDA and the later joins
+    in DuckDB fly.
 
-Por qué DuckDB y no pandas:
-  - No carga los ~590k x 430 columnas en memoria; hace streaming CSV->Parquet.
-  - `sample_size=-1` fuerza a escanear todas las filas para inferir tipos.
-    Muchas columnas son dispersas y una muestra corta las tiparía mal.
-  - Parquet queda columnar y comprimido: el EDA y los joins posteriores en
-    DuckDB vuelan.
+The competition test files are NOT touched: `test_transaction.csv` has no
+`isFraud` (design.md §3.3). The train/calib/test split is built by partitioning
+`train_transaction` by day, not by using those files.
 
-NO se tocan los archivos de test: `test_transaction.csv` no tiene `isFraud`
-(design.md §3.3). El split train/calib/test se construye particionando
-`train_transaction` por día, no usando los archivos de la competencia.
-
-Uso:
+Usage:
     python -m fraudq.data.ingest
     python -m fraudq.data.ingest --raw-dir data/raw --out-dir data/processed
 """
@@ -34,7 +32,7 @@ SECONDS_PER_HOUR = 3_600
 
 
 def _csv_to_parquet_transactions(con: duckdb.DuckDBPyConnection, src: Path, dst: Path) -> None:
-    """train_transaction.csv -> transactions.parquet, con day y hour derivados."""
+    """train_transaction.csv -> transactions.parquet, with day and hour derived."""
     con.execute(
         f"""
         COPY (
@@ -50,7 +48,7 @@ def _csv_to_parquet_transactions(con: duckdb.DuckDBPyConnection, src: Path, dst:
 
 
 def _csv_to_parquet_identity(con: duckdb.DuckDBPyConnection, src: Path, dst: Path) -> None:
-    """train_identity.csv -> identity.parquet (sin transformar)."""
+    """train_identity.csv -> identity.parquet, untransformed."""
     con.execute(
         f"""
         COPY (
@@ -68,12 +66,12 @@ def ingest(raw_dir: Path, out_dir: Path) -> None:
     idy_csv = raw_dir / "train_identity.csv"
     for f in (txn_csv, idy_csv):
         if not f.exists():
-            raise FileNotFoundError(f"No encuentro {f}. Corre scripts/download_data.sh primero.")
+            raise FileNotFoundError(f"{f} not found. Run scripts/download_data.sh first.")
 
     txn_pq = out_dir / "transactions.parquet"
     idy_pq = out_dir / "identity.parquet"
 
-    con = duckdb.connect()  # en memoria; DuckDB hace el streaming a disco
+    con = duckdb.connect()  # in memory; DuckDB does the streaming to disk
     try:
         print(f"transactions: {txn_csv}  ->  {txn_pq}")
         _csv_to_parquet_transactions(con, txn_csv, txn_pq)
@@ -81,8 +79,8 @@ def ingest(raw_dir: Path, out_dir: Path) -> None:
         print(f"identity:     {idy_csv}  ->  {idy_pq}")
         _csv_to_parquet_identity(con, idy_csv, idy_pq)
 
-        # Resumen mínimo para confirmar que la conversión no rompió nada.
-        # (No es EDA: eso va en el notebook, timeboxed.)
+        # A minimal summary, to confirm the conversion broke nothing. This is
+        # not EDA: that belongs in the notebook.
         n_txn, n_days, fraud_rate = con.execute(
             f"""
             SELECT COUNT(*), MAX(day) - MIN(day) + 1, AVG(isFraud)
@@ -96,14 +94,14 @@ def ingest(raw_dir: Path, out_dir: Path) -> None:
         con.close()
 
     print(
-        f"\nOK  transacciones={n_txn:,}  días={n_days}  "
-        f"tasa_fraude={fraud_rate:.4f}  filas_identity={n_idy:,} "
-        f"(cobertura {n_idy / n_txn:.1%})"
+        f"\nOK  transactions={n_txn:,}  days={n_days}  "
+        f"fraud_rate={fraud_rate:.4f}  identity_rows={n_idy:,} "
+        f"(coverage {n_idy / n_txn:.1%})"
     )
 
 
 def main() -> None:
-    p = argparse.ArgumentParser(description="CSV -> Parquet (IEEE-CIS) con DuckDB.")
+    p = argparse.ArgumentParser(description="CSV -> Parquet (IEEE-CIS) with DuckDB.")
     p.add_argument("--raw-dir", type=Path, default=Path("data/raw"))
     p.add_argument("--out-dir", type=Path, default=Path("data/processed"))
     args = p.parse_args()

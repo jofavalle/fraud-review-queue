@@ -1,1 +1,1 @@
-"""API de scoring — FastAPI (design.md §11.1)."""
+"""Scoring API (FastAPI)."""
