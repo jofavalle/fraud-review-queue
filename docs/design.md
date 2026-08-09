@@ -31,7 +31,7 @@ spend a scarce human resource under uncertainty?
 
 > The transactions worth reviewing are not the highest-scoring ones.
 
-The highest-scoring transactions are already blocked with confidence — a human
+The highest-scoring transactions are already blocked with confidence, so a human
 adds no information. What is worth an analyst's time is the **genuinely
 ambiguous and high-value** transaction. Ranking the review queue by fraud score,
 which is the naive implementation, sends analysts to the wrong place.
@@ -56,7 +56,7 @@ fee `F`. If it is legitimate, cost is zero.
 
 **Block:** if the transaction was legitimate (probability `1 − p`), the merchant
 loses the gross margin `m · a` on that sale, plus a friction cost `φ` (support
-contact, churn risk). If it was fraud, cost is zero — the loss was avoided.
+contact, churn risk). If it was fraud, cost is zero: the loss was avoided.
 
 **Review:** the analyst's time. Review is assumed to resolve the case correctly.
 See [Limitations](#8-limitations).
@@ -69,11 +69,11 @@ sensitivity sweep over them (§7.2).
 
 | Parameter | Base value | Rationale |
 |---|---|---|
-| `F` — chargeback fee | $20 | Card networks charge merchants a fixed fee per chargeback, typically $15–25. |
-| `m` — gross margin | 0.25 | Typical e-commerce margin. Blocking a legitimate sale costs the *profit*, not the price. |
-| `φ` — friction cost | $10 | Cost of a blocked legitimate customer: support contact, probability of not returning. The softest assumption of the four. |
-| `r` — review cost | $2 | Analyst at ~$25/hr fully loaded, ~5 minutes per case. |
-| `K` — daily capacity | 0.5–2 % of volume | A policy lever, explored as a variable. |
+| `F`, the chargeback fee | $20 | Card networks charge merchants a fixed fee per chargeback, typically $15-25. |
+| `m`, the gross margin | 0.25 | Typical e-commerce margin. Blocking a legitimate sale costs the *profit*, not the price. |
+| `φ`, the friction cost | $10 | Cost of a blocked legitimate customer: support contact, probability of not returning. The softest assumption of the four. |
+| `r`, the review cost | $2 | Analyst at ~$25/hr fully loaded, ~5 minutes per case. |
+| `K`, the daily capacity | 0.5-2 % of volume | A policy lever, explored as a variable. |
 
 ### 2.2 Thresholds depend on the amount
 
@@ -126,7 +126,7 @@ instead of deciding it automatically.
 3. Send the top-K with `V > 0` to review.
 4. Decide the rest with the cheaper automated action.
 
-This is a greedy allocation, and it is optimal — a knapsack with unit weights.
+This is a greedy allocation, and it is optimal: a knapsack with unit weights.
 
 ### 2.4 Why score is the wrong ranking
 
@@ -136,7 +136,7 @@ For a fixed amount, `V(p, a)` is maximised where the two cost curves cross:
 p* = (m·a + φ) / ((a + F) + (m·a + φ))
 ```
 
-At the base parameters this gives `p* ≈ 0.20–0.30`, **nearly independent of the
+At the base parameters this gives `p* ≈ 0.20-0.30`, **nearly independent of the
 amount**:
 
 | Amount | `p*` | `V_max` |
@@ -149,10 +149,10 @@ amount**:
 
 Value of review **peaks at moderate probabilities and grows strongly with the
 amount.** A "review top-K by score" policy concentrates analysts at `p > 0.9`,
-where `V` is low — the system is already confident there, and the automated
+where `V` is low: the system is already confident there, and the automated
 block is nearly as good as the human.
 
-At the base parameters the two sets — top-K by score, top-K by value — are
+At the base parameters the two sets, top-K by score and top-K by value, are
 **nearly disjoint**. Quantifying the resulting cost gap on held-out data is the
 purpose of this project.
 
@@ -179,17 +179,17 @@ Corporation).
 | Identity | `TransactionID`, `isFraud` | `isFraud` is the target |
 | Time | `TransactionDT` | **Seconds** from an unspecified origin. Spans ~6 months. |
 | Amount / product | `TransactionAmt`, `ProductCD` | |
-| Card | `card1`–`card6` | Anonymised. `card1` acts as a card proxy. |
+| Card | `card1`-`card6` | Anonymised. `card1` acts as a card proxy. |
 | Address | `addr1`, `addr2`, `dist1`, `dist2` | |
 | Email | `P_emaildomain`, `R_emaildomain` | Purchaser, recipient |
-| Counts | `C1`–`C14` | Counts of associated entities (meaning undisclosed) |
-| Timedeltas | `D1`–`D15` | Days since prior events. `D1` is load-bearing (§5.2). |
-| Matches | `M1`–`M9` | Boolean match flags |
-| Vesta | `V1`–`V339` | Proprietary engineered features. Highly correlated, heavily null. |
+| Counts | `C1`-`C14` | Counts of associated entities (meaning undisclosed) |
+| Timedeltas | `D1`-`D15` | Days since prior events. `D1` is load-bearing (§5.2). |
+| Matches | `M1`-`M9` | Boolean match flags |
+| Vesta | `V1`-`V339` | Proprietary engineered features. Highly correlated, heavily null. |
 
-`train_identity.csv` joins on `TransactionID`: `id_01`–`id_38`, `DeviceType`,
+`train_identity.csv` joins on `TransactionID`: `id_01`-`id_38`, `DeviceType`,
 `DeviceInfo`. **It covers only a fraction of transactions.** Left join, keep the
-nulls — LightGBM handles NaN natively, and the *absence* of identity data is
+nulls: LightGBM handles NaN natively, and the *absence* of identity data is
 itself a signal.
 
 ### 3.2 Operational notes
@@ -223,10 +223,10 @@ Sorted by `TransactionDT`, cut by day:
 
 | Partition | Days | Purpose |
 |---|---|---|
-| **Train** | 0 – 119 | Model fitting, hyperparameter search |
-| **Embargo** | 120 – 129 | **Unused** |
-| **Calibration + policy** | 130 – 155 | Fit the calibrator; set thresholds; explore `K` |
-| **Test** | 156 – end | Final evaluation. **Looked at once.** |
+| **Train** | 0 to 119 | Model fitting, hyperparameter search |
+| **Embargo** | 120 to 129 | **Unused** |
+| **Calibration + policy** | 130 to 155 | Fit the calibrator; set thresholds; explore `K` |
+| **Test** | 156 to the end | Final evaluation. **Looked at once.** |
 
 ### 4.1 Never a random split
 
@@ -245,7 +245,7 @@ availability. That assumption is false. The 10-day embargo simulates the gap.
 ### 4.3 The calibrator sees held-out data only
 
 Fitting the calibrator on the training set produces systematically overconfident
-probabilities — the model has already seen those labels.
+probabilities, because the model has already seen those labels.
 
 **The entire cost layer depends on `p` being a real probability.** A
 mis-calibrated model makes the "optimal" policy no longer optimal. This is why
@@ -257,10 +257,10 @@ Hyperparameter search inside the training window uses an **expanding window**,
 not KFold:
 
 ```
-Fold 1: train 0–39   valid 40–59
-Fold 2: train 0–59   valid 60–79
-Fold 3: train 0–79   valid 80–99
-Fold 4: train 0–99   valid 100–119
+Fold 1: train 0-39   valid 40-59
+Fold 2: train 0-59   valid 60-79
+Fold 3: train 0-79   valid 80-99
+Fold 4: train 0-99   valid 100-119
 ```
 
 ---
@@ -270,7 +270,7 @@ Fold 4: train 0–99   valid 100–119
 ### 5.1 Base features
 
 - `log1p(TransactionAmt)`
-- **Decimal part of the amount** (`TransactionAmt % 1`) — currency-converted or
+- **Decimal part of the amount** (`TransactionAmt % 1`). Currency-converted or
   programmatically generated amounts leave odd signatures here.
 - Hour of day
 - Email domains: group rare ones, extract the base provider
@@ -324,7 +324,7 @@ cannot tell the difference.
 339 columns with correlated blocks and shared null patterns. Approach, in
 priority order:
 
-1. Group by **null pattern** — columns sharing a pattern belong to the same
+1. Group by **null pattern**: columns sharing a pattern belong to the same
    Vesta block.
 2. Within each block, keep one representative per highly correlated group.
 3. Or hand them all to LightGBM, which is robust to redundant features, and
@@ -351,8 +351,8 @@ Train on a 50/50 resample of a 3.5 % base rate and every predicted probability
 is systematically inflated.
 
 **The cost layer requires `p` to be a real probability.** If `p` is meaningless,
-`V` is meaningless, and the decision layer — the entire point of this project —
-collapses.
+`V` is meaningless, and the decision layer, which is the entire point of this
+project, collapses.
 
 Class imbalance is not a problem *per se*. LightGBM with `objective="binary"`
 and log loss handles a 3.5 % positive rate without difficulty. What needs
@@ -363,12 +363,12 @@ regression are reported side by side in `reports/figures/`.
 
 ### 6.3 Calibration
 
-Fitted **only** on the calibration partition (days 130–155).
+Fitted **only** on the calibration partition (days 130-155).
 
 - **Platt scaling** (sigmoid) and **isotonic regression**, compared.
 - Diagnostics: **reliability diagram**, **Brier score**, **ECE**.
 - **Calibration is reported per score decile, not only in aggregate.** A model
-  can be well calibrated on average and badly calibrated in the top 1 % — which
+  can be well calibrated on average and badly calibrated in the top 1 %, which
   is exactly where the expensive decisions are made. The average hides the error
   where it matters.
 
@@ -376,12 +376,12 @@ Fitted **only** on the calibration partition (days 130–155).
 
 | Metric | Used | Why |
 |---|---|---|
-| Accuracy | ✗ | With 3.5 % positives, "all legitimate" scores 96.5 %. |
+| Accuracy | no | With 3.5 % positives, "all legitimate" scores 96.5 %. |
 | ROC-AUC | Reported, not leading | Optimistic under heavy imbalance. |
-| **PR-AUC** | ✓ | The correct discrimination metric under imbalance. |
-| **Precision@K / Recall@K** | ✓ | With `K` = review capacity. The operational metric. |
-| **Brier / ECE** | ✓ | Without these, the cost layer is not valid. |
-| **Expected loss per $1,000 of volume** | ✓ — primary | The only metric a business reads. |
+| **PR-AUC** | yes | The correct discrimination metric under imbalance. |
+| **Precision@K / Recall@K** | yes | With `K` = review capacity. The operational metric. |
+| **Brier / ECE** | yes | Without these, the cost layer is not valid. |
+| **Expected loss per $1,000 of volume** | yes, the primary one | The only metric a business reads. |
 
 ---
 
@@ -400,7 +400,7 @@ Evaluated on the test partition. **One look.**
 
 **Primary metric: expected loss per $1,000 of transaction volume.**
 
-**The headline number is the gap between (3) and (4)** — the cost of ranking a
+**The headline number is the gap between (3) and (4)**: the cost of ranking a
 review queue by score rather than by expected value.
 
 Also reported per policy: fraud caught, fraud missed, legitimate transactions
@@ -421,7 +421,7 @@ This answers two questions:
 - **How robust is the conclusion?** If the (4)-over-(3) saving survives the full
   parameter range, the finding holds independently of the exact assumptions.
 - **Which parameter is worth measuring properly?** Whichever dominates the
-  tornado is the one where the business's next dollar of effort belongs — and
+  tornado is the one where the business's next dollar of effort belongs, and
   that recommendation is an output of this analysis, not an input to it.
 
 ### 7.3 Drift
@@ -443,13 +443,13 @@ Informs a retraining cadence.
   offline evaluation does not model it.
 - **Static capacity.** Real queues have shift patterns, backlogs, and SLA
   prioritisation.
-- **The data is from 2017–2018.** Fraud patterns have moved.
+- **The data is from 2017-2018.** Fraud patterns have moved.
 
 ---
 
 ## 9. Project invariants
 
-**These are non-negotiable. Every contributor — human or agent — follows them.**
+**These are non-negotiable. Every contributor, human or agent, follows them.**
 
 1. **Splits are strictly temporal** by `TransactionDT`. Never
    `train_test_split(shuffle=True)`. A 10-day embargo separates train from
@@ -461,7 +461,7 @@ Informs a retraining cadence.
 3. **Every UID aggregate is backward-looking**: `expanding()` + `.shift(1)`.
    Any new feature must pass `tests/test_no_future_leakage.py`.
 
-4. **The calibrator is fitted on the calibration partition only** — never on
+4. **The calibrator is fitted on the calibration partition only**, never on
    data the model was trained on.
 
 5. **The test partition is evaluated once**, at the end. It is not a tuning set.
@@ -475,7 +475,7 @@ Informs a retraining cadence.
    a function.** The sensitivity analysis builds variants with
    `dataclasses.replace` and runs the pipeline against each. A function that
    reaches for `CONFIG` directly instead of taking it as an argument silently
-   ignores the sweep — and fails without raising.
+   ignores the sweep, and fails without raising.
 
 9. **Logic lives in `src/`.** Notebooks are for exploration and for the final
    report, not for the pipeline.

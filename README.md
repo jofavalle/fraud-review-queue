@@ -15,15 +15,15 @@
 A payment processor cannot manually inspect every transaction, and cannot
 automate every decision either. Real fraud operations run a **three-zone
 policy**: block automatically above a high score, approve automatically below a
-low one, and send the ambiguous middle to a **manual review queue** — a queue
-with **finite analyst capacity**.
+low one, and send the ambiguous middle to a **manual review queue**, one with **finite
+analyst capacity**.
 
 That makes this an **allocation problem**, not a classification problem: how do
 you spend a scarce human resource under uncertainty?
 
 Because the cost of approving fraud scales with the transaction amount, and so
 does the cost of blocking a legitimate customer, **the optimal thresholds are
-not constants — they depend on the amount.** A single-threshold system is
+not constants: they depend on the amount.** A single-threshold system is
 structurally the wrong policy.
 
 And once capacity binds, the correct quantity to rank the queue by is not the
@@ -33,8 +33,8 @@ fraud score but the **value of review**:
 V = min( p·(a + F),  (1 − p)·(m·a + φ) ) − r
 ```
 
-— the expected-cost reduction from sending a transaction to a human rather than
-deciding it automatically.
+This is the expected-cost reduction from sending a transaction to a human
+rather than deciding it automatically.
 
 `V` peaks at **moderate** probabilities and grows with the amount. Ranking by
 score concentrates analysts where the system is already confident, and where a
@@ -78,7 +78,7 @@ by side.
 
 **The UID: entity resolution, not leakage.**
 A customer identifier can be reconstructed from `card1`, `addr1` and a
-normalisation of `D1`. In production, such an identifier exists — recovering it
+normalisation of `D1`. In production, such an identifier exists, so recovering it
 is legitimate. What *would* be leakage is aggregating the target over it. Every
 UID aggregate here is strictly backward-looking.
 
@@ -214,7 +214,7 @@ movement that would matter over a longer horizon.
   fraud. A deployed system faces selective labelling; this offline evaluation
   does not model it.
 - Static capacity. Real queues have shifts, backlogs, and SLA prioritisation.
-- The data is from 2017–2018. Fraud patterns have moved.
+- The data is from 2017-2018. Fraud patterns have moved.
 - **Feature drift was not measured.** `docs/design.md` §7.3 asks for PSI on the
   top features, and `psi` and `psi_by_month` are implemented, but the persisted
   scoring carries only identifiers, amount, label and probability. Computing PSI
@@ -248,8 +248,8 @@ uv run streamlit run app/streamlit_app.py
 ```
 
 The pipeline writes `reports/scored_calib.parquet`, `reports/scored_test.parquet`,
-`reports/policy_comparison.csv` and `models/artifacts/`. Everything downstream —
-the sensitivity sweep, the drift report, the API and the queue simulator — reads
+`reports/policy_comparison.csv` and `models/artifacts/`. Everything downstream
+(the sensitivity sweep, the drift report, the API and the queue simulator) reads
 those, so **the test partition is scored once and never looked at again**. The
 pipeline takes about 15 minutes on four cores; the analysis on top of it takes
 20 seconds, because it re-scores nothing.
@@ -266,8 +266,8 @@ docker run --rm -p 8000:8000 -v $PWD/models/artifacts:/models fraud-review-queue
 ```
 
 The **queue simulator** lets you move analyst capacity and each cost assumption
-and watch the expected loss — and the gap against score-ranked triage — move with
-them.
+and watch the expected loss, along with the gap against score-ranked triage,
+move with them.
 
 ---
 
