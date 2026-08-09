@@ -22,7 +22,8 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      # Major tag, which this action does publish: refs/tags/v7 resolves.
+      - uses: actions/checkout@v7
 
       # Full version: this action publishes no moving major tag, only v9.0.0.
       - uses: astral-sh/setup-uv@v9.0.0
