@@ -30,9 +30,12 @@ from fraudq.data.synthetic import SYNTHETIC_SPLIT, make_synthetic_transactions
 from fraudq.diagnostics import run_diagnostics
 from fraudq.pipeline import run_pipeline
 
-#: Every report the notebook and `docs/report.md` read.
+#: Every report the notebook and `docs/report.md` read. `scored_train.parquet` is
+#: among them because the score-distribution figure needs all three partitions and
+#: the pipeline leaves only two behind.
 _EXPECTED_REPORTS = (
     "feature_importance.csv",
+    "scored_train.parquet",
     "roc_curve.csv",
     "pr_curve.csv",
     "operating_points.csv",

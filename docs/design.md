@@ -383,6 +383,47 @@ Fitted **only** on the calibration partition (days 130-155).
 | **Brier / ECE** | yes | Without these, the cost layer is not valid. |
 | **Expected loss per $1,000 of volume** | yes, the primary one | The only metric a business reads. |
 
+### 6.5 Diagnostics
+
+The metrics above say how good the model is. These say **what it is made of and
+whether the number on test can be believed.** They are computed by
+`fraudq.diagnostics`, which loads the persisted booster and never fits one.
+
+| Diagnostic | Question it answers |
+|---|---|
+| Importance by **gain** and by **split** | Which columns carry the score. Promised in §5.4 and delivered here. |
+| **Null-pattern blocks** of the V-columns | Whether the Vesta blocks of §5.4 exist, recovered without looking at a value. |
+| **Spearman** rank correlation | How much of that importance is redundant. Not Pearson: the C, D and amount columns have long tails, and Pearson would measure the outliers. |
+| **ROC and PR curves**, with operating points | The whole trade-off rather than the scalar AUC, and where a capacity-constrained queue actually sits on it. |
+| **Two-sample KS** between partitions | Whether two score distributions are the same. |
+| **Learning curve** per CV fold | Overtraining, isolated from drift. |
+
+**Two rules attached to these, because both are easy to get wrong.**
+
+1. **A KS between train and test is not a test for overtraining here.** With a
+   random split it would be, and that is where the habit comes from. This split
+   is temporal (§4.1), so that difference sums overtraining and genuine drift
+   and separates neither. Worse, at n in the hundreds of thousands the p-value
+   is ~0 for a difference of no operational size, so the test degenerates into
+   asking whether two distributions are literally identical. **Report the
+   statistic `D`**, which is a distance and does not grow with n, and read the
+   p-value as a statement about the sample size.
+
+   Three comparisons are reported so the reader can separate what the single one
+   cannot: calib against test (both unseen, so drift alone), train against test,
+   and train against calib. Splitting each by class matters too, since the
+   overall distributions can differ merely because the fraud rate moved.
+
+2. **The clean overtraining measurement is the learning curve**, where PR-AUC on
+   the fit window and on the validation window are recorded per boosting round
+   **within the same expanding-window fold** (§4.4). The two windows are
+   adjacent in time, which holds drift roughly constant between them, so the gap
+   at the chosen iteration is overtraining and not calendar.
+
+**These diagnostics may not change the model.** They are read after the fact,
+off artefacts that already exist. A diagnostic that prompted a hyperparameter
+change would have turned test into a tuning set, which invariant 5 forbids.
+
 ---
 
 ## 7. Evaluation

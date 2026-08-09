@@ -8,6 +8,7 @@ Sibling of `fraudq.analysis`, which reports on the DECISION layer. This one
 reports on the MODEL underneath it, and writes:
 
     reports/feature_importance.csv    gain and split, per feature
+    reports/scored_train.parquet      train scores, the only partition not persisted
     reports/roc_curve.csv             the full ROC over test
     reports/pr_curve.csv              the full precision-recall curve
     reports/operating_points.csv      where the queues sit on them
@@ -221,6 +222,11 @@ def run_feature_phases(
     train_scores = predict_scores(booster, parts["train"], feature_cols)
     scored_train = parts["train"][["day", "isFraud"]].copy()
     scored_train["score_raw"] = train_scores
+    # Persisted because the score-distribution figure needs all three partitions
+    # side by side, and this is the only one the pipeline does not leave behind.
+    # No `p`: the calibrator was fitted on calib, so a calibrated probability for
+    # rows the model trained on would not mean anything.
+    scored_train.to_parquet(reports_dir / "scored_train.parquet", index=False)
     print(
         f"  train scored: {len(scored_train):,} rows, days "
         f"{parts['train']['day'].min()}-{parts['train']['day'].max()}"
