@@ -23,7 +23,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: astral-sh/setup-uv@v9
+      # Full version: this action publishes no moving major tag, only v9.0.0.
+      - uses: astral-sh/setup-uv@v9.0.0
         with:
           enable-cache: true
 
