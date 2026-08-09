@@ -156,7 +156,11 @@ def plot_tornado(tornado_df: pd.DataFrame, base_savings: float, ax=None,
     ax.barh(labels, hi - lo, left=lo, height=0.6, alpha=0.85)
     ax.axvline(base_savings, linestyle="--", linewidth=1.2, label="base")
     ax.axvline(0.0, color="black", linewidth=0.8)
-    ax.set_xlabel("Savings of value-ranked queue vs. score-ranked, $ per $1,000")
-    ax.legend(loc="lower right")
+    # Un solo `$` en la cadena, a proposito: dos delimitan mathtext y matplotlib
+    # se come los simbolos y pone el texto de en medio en cursiva.
+    ax.set_xlabel("Savings of the value-ranked queue over the score-ranked, per $1,000")
+    # A la izquierda: las barras viven a la derecha del base, y en lower right la
+    # leyenda se solapaba con la fila del parametro de menor swing.
+    ax.legend(loc="lower left")
     ax.figure.tight_layout()
     return ax
