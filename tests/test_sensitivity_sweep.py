@@ -35,12 +35,14 @@ def scored() -> pd.DataFrame:
     n_days, per_day = 6, 200
     p = rng.beta(0.6, 6.0, size=n_days * per_day)
     amt = 1000.0 / (1.0 + 40.0 * p) * rng.lognormal(0.0, 0.4, size=len(p))
-    return pd.DataFrame({
-        "day": np.repeat(np.arange(n_days), per_day),
-        "TransactionAmt": amt,
-        "p": p,
-        "isFraud": rng.binomial(1, p),
-    })
+    return pd.DataFrame(
+        {
+            "day": np.repeat(np.arange(n_days), per_day),
+            "TransactionAmt": amt,
+            "p": p,
+            "isFraud": rng.binomial(1, p),
+        }
+    )
 
 
 @pytest.fixture
@@ -100,8 +102,9 @@ def test_savings_per_1k_is_score_ranked_minus_value_ranked(evaluate):
 def test_conclusion_survives_reads_both_ends(evaluate):
     """False as soon as a single end of a single range takes the saving to zero."""
     tornado = tornado_data(CostConfig(), SENSITIVITY_RANGES, evaluate)
-    assert conclusion_survives(tornado) == bool((tornado[["savings_at_low",
-                                                         "savings_at_high"]] > 0).all().all())
+    assert conclusion_survives(tornado) == bool(
+        (tornado[["savings_at_low", "savings_at_high"]] > 0).all().all()
+    )
 
     broken = tornado.copy()
     broken.loc[0, "savings_at_low"] = -0.01

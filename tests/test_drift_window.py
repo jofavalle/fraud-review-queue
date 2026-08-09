@@ -25,11 +25,13 @@ def scored_test_window() -> pd.DataFrame:
     rng = np.random.default_rng(1)
     days = np.repeat(np.arange(FIRST_TEST_DAY, LAST_TEST_DAY + 1), 40)
     p = rng.beta(0.7, 5.0, size=len(days))
-    return pd.DataFrame({
-        "day": days,
-        "p": p,
-        "isFraud": rng.binomial(1, np.clip(p * 3.0, 0.0, 1.0)),
-    })
+    return pd.DataFrame(
+        {
+            "day": days,
+            "p": p,
+            "isFraud": rng.binomial(1, np.clip(p * 3.0, 0.0, 1.0)),
+        }
+    )
 
 
 def test_the_default_bin_collapses_the_window_to_one_point(scored_test_window):
