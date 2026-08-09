@@ -42,3 +42,11 @@ testpaths = ["tests"]
 
 [tool.ruff]
 line-length = 100
+
+# The rule set is declared, not inherited. Left implicit, it is whatever the
+# installed ruff decides that day: 0.16 widened its defaults and turned the
+# repository red without a line of code changing. E402 lives inside E4, which
+# is what makes the `# noqa: E402` on an import placed after a
+# `pytest.importorskip` a justified suppression rather than dead weight.
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F"]

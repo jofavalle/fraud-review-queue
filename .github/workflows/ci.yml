@@ -1,12 +1,14 @@
-# CI: pytest + ruff (design.md §11.3). Delegable (plan §5.3).
+# CI: ruff + pytest (design.md §11.3).
 #
-# Badge para el README (ajusta usuario si hace falta):
+# Badge for the README:
 #   [![CI](https://github.com/jofavalle/fraud-review-queue/actions/workflows/ci.yml/badge.svg)](https://github.com/jofavalle/fraud-review-queue/actions/workflows/ci.yml)
 #
-# Las dependencias se instalan con lista explícita + `-e . --no-deps`: el CI no
-# depende de cómo estén declarados los extras en pyproject.toml, y la lista es
-# visible en el propio workflow. Si añades una dependencia al proyecto,
-# añádela también aquí — el CI en rojo te lo va a recordar.
+# The environment comes from `uv.lock` and nothing else. An earlier version of
+# this workflow installed a hand written list of packages with pip, which meant
+# two sources of truth that had to be kept in sync by hand, and an unpinned ruff
+# whose defaults changed under the repository. `uv sync --locked` fails outright
+# if the lock and pyproject.toml disagree, so a new dependency reaches CI the
+# moment it is added, and the runner builds the same environment as a developer.
 
 name: ci
 
@@ -21,21 +23,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
+      - uses: astral-sh/setup-uv@v9
         with:
-          python-version: "3.11"
-          cache: pip
+          enable-cache: true
 
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install numpy pandas pyarrow duckdb scikit-learn lightgbm \
-                      fastapi httpx pydantic "uvicorn[standard]" \
-                      pytest ruff
-          pip install -e . --no-deps
+      - name: Install the locked environment
+        run: uv sync --locked
 
       - name: Lint (ruff)
-        run: ruff check src tests app
+        run: uv run ruff check src tests app
 
       - name: Tests
-        run: pytest -q
+        run: uv run pytest -q
