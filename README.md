@@ -8,6 +8,11 @@
 > conclusion holds across the full assumed range of every cost parameter.
 > Full spec in `docs/design.md`.
 
+**This README is the summary. [`docs/report.md`](docs/report.md) is the full
+analysis**, from the problem statement to the result, with the evidence for each
+decision at the point it was made: the exploration, the entity-resolution
+finding, the feature importance, the overtraining diagnostics and the drift.
+
 ---
 
 ## The problem
@@ -139,6 +144,22 @@ expanding-window folds.
 
 ![Reliability of the raw score and of the calibrated probability](reports/figures/fig2_calibration_before_after.png)
 
+Of the 412 features, 399 were split on at least once and the top 25 carry 57.3 %
+of the total gain. Per column the picture is not the one the column counts
+suggest: the 339 anonymised V-columns hold 39.0 % of the gain and the 14
+C-columns hold 19.6 %, so a C-column is worth about twelve times a V-column.
+
+![Feature importance by gain, and gain by family against the number of columns](reports/figures/fig8_feature_importance.png)
+
+**Where a capacity-constrained queue sits on the ROC is not where a
+classification metric would put it.** At the same 737 reviews, the value-ranked
+queue holds 20.4 % fraud against 84.8 % for the score-ranked one, and costs
+$9.56 per $1,000 less. Queue precision measures how much fraud an analyst sees;
+it does not measure whether the analyst changed the outcome, and only the second
+is worth paying for. `docs/report.md` §8.5 works through it.
+
+![ROC and precision-recall curves with the three operating points](reports/figures/fig7_roc_and_pr_curves.png)
+
 ---
 
 ## Sensitivity
@@ -215,12 +236,18 @@ movement that would matter over a longer horizon.
   does not model it.
 - Static capacity. Real queues have shifts, backlogs, and SLA prioritisation.
 - The data is from 2017-2018. Fraud patterns have moved.
-- **Feature drift was not measured.** `docs/design.md` §7.3 asks for PSI on the
-  top features, and `psi` and `psi_by_month` are implemented, but the persisted
-  scoring carries only identifiers, amount, label and probability. Computing PSI
-  means rebuilding all 412 features for both partitions, which is a full pipeline
-  run rather than a read of `reports/`. What is reported above is performance
-  drift, which the persisted artefacts do support.
+- **The entity resolution over-splits.** The UID assumes `D1n = day - D1` is
+  constant per card, and it is not: only 15.7 % of `(card1, addr1)` groups have a
+  single `D1n`, so 58 % of UIDs end up carrying one transaction and the
+  backward-looking features are sparse. The error is in the safe direction, since
+  a UID that merged customers would manufacture history between strangers, but it
+  costs those five features most of their potential. `docs/report.md` §5.1.
+- **Feature drift is now measured, and it is not there.** PSI of the top 25
+  features against train, week by week of test, peaks at **0.0746**, below even
+  the 0.10 line for stability. The fraud *rate* does climb over the same window,
+  from 2.84 % to 4.09 %, and PSI does not look at labels: stable inputs with a
+  rising fraud rate argues for retraining on a schedule rather than on a drift
+  alarm. `make diagnostics` produces it.
 
 ---
 
@@ -278,15 +305,18 @@ src/fraudq/
 ├── config.py           # every cost and policy assumption, in one place
 ├── pipeline.py         # the driver: chains the stages below end to end
 ├── analysis.py         # sensitivity and drift, off the persisted scoring
+├── diagnostics.py      # importance, curves, KS, PSI, learning curve
 ├── data/               # ingest (CSV → parquet), temporal split, synthetic data
 ├── features/           # UID construction, backward-looking aggregates
 ├── models/             # training, probability calibration, artifact persistence
 ├── policy/             # cost functions, value of review, capacity allocation
-├── evaluate/           # metrics, policy comparison, sensitivity, drift
+├── evaluate/           # metrics, policy comparison, sensitivity, drift, diagnostics
 └── api/                # FastAPI scoring endpoint
 
 tests/                  # including the temporal leakage guard
+docs/report.md          # the full analysis, problem to result
 docs/design.md          # cost model, derivations, project invariants
+docs/RUNBOOK.md         # how to run every stage
 app/                    # queue simulator
 scripts/                # Kaggle download
 ```

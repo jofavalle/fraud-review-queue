@@ -103,6 +103,7 @@ seconds against the pipeline's 15 minutes.
 
 ```bash
 uv run python -m fraudq.analysis                # sweep and drift into reports/
+uv run python -m fraudq.diagnostics --learning-curve   # model diagnostics
 uv run jupyter lab notebooks/03_results.ipynb   # figures into reports/figures/
 uv run streamlit run app/streamlit_app.py       # queue simulator
 uv run uvicorn fraudq.api.main:app --port 8000  # scoring endpoint
@@ -110,7 +111,41 @@ uv run uvicorn fraudq.api.main:app --port 8000  # scoring endpoint
 
 `fraudq.analysis` writes `sensitivity_tornado.csv`, `drift_by_week.csv` and
 `analysis_summary.json`, and the notebook reads all three. Run it before the
-notebook: three of the six figures have nothing to draw otherwise.
+notebook: three of the twelve figures have nothing to draw otherwise.
+
+### `fraudq.diagnostics` is the one exception to "reads the persisted scoring"
+
+It reports on the model rather than on the decision layer, and two of its
+outputs cannot come from `reports/`: PSI and the correlation matrix need
+**feature values**, and the persisted scoring carries identifiers, amount, label
+and probability only. So it rebuilds the 412 features from `data/processed/`,
+which is what it costs.
+
+```bash
+uv run python -m fraudq.diagnostics --cheap-only        # ~10 s, artefacts only
+uv run python -m fraudq.diagnostics                     # + feature rebuild, ~3 min
+uv run python -m fraudq.diagnostics --learning-curve    # + retrained folds, ~20 min
+```
+
+Measured on the reference machine: the full run with the learning curve took
+**16 minutes with a peak of 6.66 GiB of RSS**, of which the feature rebuild was
+about two minutes and the retrained folds were the rest. The peak sits alongside
+the pipeline's own, so the same memory caveat applies. The learning curve is the
+long pole because recording PR-AUC on the fit window as well as the validation
+window roughly doubles the cost of every boosting round.
+
+**It regenerates no model.** The booster and the calibrator are loaded, never
+fitted, and every output is a new file. Two guards abort the run rather than
+report a number that would be quietly wrong:
+
+- The features it rebuilds must re-score the test partition to **exactly** the
+  values in `scored_test.parquet`. A mismatch means the feature pipeline is not
+  deterministic or the artefacts are stale.
+- The folds it retrains must choose the number of trees the persisted booster
+  already has. That is what entitles the learning curve to be presented as the
+  overtraining of the published model.
+
+Run it in `tmux` with an end marker, like the pipeline.
 
 One subtlety worth knowing before reading the code. `run_pipeline` fits the
 single-threshold policy on calib and prints the threshold without persisting it,
