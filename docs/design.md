@@ -465,6 +465,19 @@ This answers two questions:
   tornado is the one where the business's next dollar of effort belongs, and
   that recommendation is an output of this analysis, not an input to it.
 
+**Capacity is swept separately, and it is a different kind of question.** The
+four cost parameters are assumptions about a business; capacity is a fact about
+an operation, and a reader will want to substitute their own. `daily_capacity_pct`
+is therefore swept across `PolicyConfig.capacity_sweep`, fixed in config like the
+cost ranges and for the same reason.
+
+The sweep carries one reference point that is not a swept value: **capacity
+zero**, where both queue policies collapse to the same automatic rule. Without it
+the other rows have no scale, because a queue is not free. Every review costs `r`,
+and reviewing a case the automatic rule had already decided correctly buys
+nothing, so a queue can cost **more** than not having one. The capacity at which
+that stops being true is an output of this sweep.
+
 ### 7.3 Drift
 
 - **PSI** by month on the top features.

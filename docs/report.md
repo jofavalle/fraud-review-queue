@@ -234,24 +234,78 @@ final model, fitted on all of train with no early stopping, because there is no
 legitimate validation set that is not from the future and settling that was
 exactly the cross-validation's job.
 
+### 6.1 The baseline, so that 0.526 means something
+
+A PR-AUC of 0.526 is not interpretable on its own. It is interpretable next to
+what a simple model gets on the same partition, so a logistic regression is
+fitted on train and evaluated on test under exactly the same rules: median
+imputation, standardisation, `class_weight=None`, and one look.
+
+**Its 22 features are declared, not derived from the trained model.** They are
+the §5.1 base features, the four frequency encodings and the C family, chosen
+out of the design document. Building the baseline from the top of the gain
+ranking would have been a different and much less interesting experiment: it
+would measure how much of the LightGBM model a linear form can recover, not what
+an honest simple model achieves by itself.
+
+| Model | Features | PR-AUC | Against chance | ROC-AUC |
+|---|---|---|---|---|
+| Chance (the base rate) | | 0.035 | 1.0x | 0.500 |
+| Logistic regression | 22 | 0.199 | 5.6x | 0.775 |
+| **LightGBM** | 412 | **0.526** | **14.9x** | **0.903** |
+
+The gradient boosting model is worth **2.6 times the logistic baseline** on the
+metric that leads. That is the number that makes the modelling effort defensible,
+and it is worth noting that the baseline is itself far from useless: most of the
+distance from chance to the final model is covered by 22 features and a linear
+form, which is the usual and frequently unreported shape of this comparison.
+
 ---
 
 ## 7. Calibration
 
 Fitted **only** on the calibration partition, which the model never trained on.
+The choice between the two methods uses a temporal holdout inside calibration:
+comparing on the data used to fit would always favour isotonic, which is the
+more flexible of the two.
 
-Platt scaling and isotonic regression were compared on a temporal holdout inside
-calibration, and **Platt won on Brier: 0.01825, against 0.01833 for the raw
-score and 0.01853 for isotonic.** The margins are small, and the honest reading
-is that the raw LightGBM score was already close to calibrated; Platt improves
-it slightly and isotonic overfits the holdout.
+![Reliability curves for the raw score, Platt and isotonic, and the Brier scores that decided](../reports/figures/fig2_calibration_before_after.png)
 
-![Reliability of the raw score and of the calibrated probability](../reports/figures/fig2_calibration_before_after.png)
+| Calibrator | Brier | ECE |
+|---|---|---|
+| Raw score | 0.01833 | 0.00597 |
+| **Platt scaling** | **0.01825** | **0.00417** |
+| Isotonic regression | 0.01853 | 0.00490 |
 
-On test the calibrated probabilities reach **Brier 0.0229 and ECE 0.0029**.
-Calibration is also reported by score decile rather than only in aggregate,
-because a model can be perfectly calibrated on average and badly calibrated in
-the top 1 %, which is exactly where the expensive decisions are made.
+**Platt won, by thousandths.** The honest reading of a margin that small is that
+the raw LightGBM score was already close to calibrated; Platt improves it
+slightly, and isotonic, being the more flexible, overfits the holdout and comes
+last. On test the calibrated probabilities reach **Brier 0.0229 and ECE 0.0029**.
+
+### 7.1 The aggregate hides the error where it matters
+
+`design.md` §6.3 makes a specific claim: a model can be well calibrated on
+average and badly calibrated at the top of the score, which is exactly where the
+expensive decisions are made. The claim turns out to be right about this model.
+
+![Predicted against observed probability by score decile, and the gap](../reports/figures/fig14_calibration_by_decile.png)
+
+| Decile of raw score | 0 | 3 | 6 | 8 | **9** |
+|---|---|---|---|---|---|
+| Mean predicted | 0.0011 | 0.0050 | 0.0147 | 0.0427 | **0.2715** |
+| Observed rate | 0.0017 | 0.0048 | 0.0121 | 0.0472 | **0.2459** |
+| Gap | 0.0007 | 0.0003 | 0.0026 | 0.0045 | **0.0256** |
+
+**The gap in the top decile is 0.0256, roughly nine times the aggregate ECE of
+0.0029**, and it points the same way throughout: in the 10 % of transactions the
+model finds most suspicious it predicts 27.2 % fraud and observes 24.6 %, so it
+is **overconfident by 2.6 percentage points precisely where the review queue
+lives**.
+
+That is not a large error and it does not undermine the results, but it is the
+number the cost layer actually depends on, since `V` is computed from `p` and the
+queue is filled from the top. An aggregate ECE would have reported 0.0029 and
+said nothing about it.
 
 ---
 
@@ -528,6 +582,51 @@ sides identically and cancels; it is also a constant subtracted from every `V`,
 so it cannot reorder the queue either. It takes roughly `r = 50` before the
 value-ranked queue declines to spend its capacity, which is 25 times the assumed
 cost of an analyst touching a case.
+
+### 11.1 The other sensitivity: how big is the queue?
+
+The tornado sweeps assumptions about the business. Capacity is not an
+assumption, it is a fact about an operation, and a reader will want to substitute
+their own. A result measured at one queue size says nothing about five times
+that, so the five sizes of `PolicyConfig.capacity_sweep` are evaluated, fixed in
+config before any result was seen.
+
+![Cost of each policy by queue size, and the absolute and relative saving](../reports/figures/fig13_capacity_sweep.png)
+
+| Capacity | Reviews | Cost, by score | Cost, by value | Saving | Saving % |
+|---|---|---|---|---|---|
+| **none (reference)** | 0 | **$32.49** | **$32.49** | | |
+| 0.2 % | 137 | $32.51 | $29.77 | $2.74 | 8.4 % |
+| 0.5 % | 363 | $32.49 | $26.64 | $5.85 | 18.0 % |
+| 1.0 % | 737 | $32.21 | $22.65 | $9.56 | 29.7 % |
+| 2.0 % | 1,489 | $30.45 | $19.46 | $10.98 | 36.1 % |
+| 5.0 % | 3,745 | $22.04 | $14.00 | $8.04 | 36.5 % |
+
+The first row is a reference rather than a swept point: with no queue both
+policies collapse to the same automatic rule, and that is the number a queue has
+to beat. Three things come out of the table, and the first is the sharpest
+statement of the thesis anywhere in this report.
+
+**A score-ranked queue is worth less than nothing until it is fairly large.** At
+0.2 % capacity it costs $32.51 against $32.49 for having no queue at all, and at
+0.5 % it is still marginally behind. It does not pay for itself until 1 %. The
+mechanism is exactly the one §2 predicts: a queue filled by score spends its
+first analysts on cases at `p > 0.9`, which the automatic rule was already
+blocking correctly, so each review costs `r` and changes nothing. **A
+value-ranked queue is ahead from the very first analyst**, saving $2.74 per
+$1,000 at a capacity of 137 reviews across the whole window.
+
+**The absolute and the relative saving peak in different places, and reporting
+only one would mislead.** The dollar saving is largest at 2 % capacity ($10.98)
+and falls at 5 % ($8.04), because by then the automatic rule has less left to get
+wrong and both policies are converging on the same good decisions. The relative
+saving keeps climbing and flattens around 36 %. If this operation were choosing a
+headcount, 2 % of volume is where the marginal analyst is worth most.
+
+**The `V > 0` filter never binds.** Utilisation is 1.00 at every capacity swept,
+including 5 %, so the value-ranked queue always finds 3,745 cases worth reviewing
+and never declines capacity it has been given. That was not guaranteed, and it
+means the sweep is measuring the ranking rather than the filter.
 
 ---
 

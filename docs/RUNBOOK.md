@@ -109,9 +109,10 @@ uv run streamlit run app/streamlit_app.py       # queue simulator
 uv run uvicorn fraudq.api.main:app --port 8000  # scoring endpoint
 ```
 
-`fraudq.analysis` writes `sensitivity_tornado.csv`, `drift_by_week.csv` and
-`analysis_summary.json`, and the notebook reads all three. Run it before the
-notebook: three of the twelve figures have nothing to draw otherwise.
+`fraudq.analysis` writes `sensitivity_tornado.csv`, `capacity_sweep.csv`,
+`drift_by_week.csv` and `analysis_summary.json`, and the notebook reads all
+four. Run it before the notebook: four of the fourteen figures have nothing to
+draw otherwise.
 
 ### `fraudq.diagnostics` is the one exception to "reads the persisted scoring"
 

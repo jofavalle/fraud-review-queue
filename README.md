@@ -137,12 +137,21 @@ ranking quantity.
 | Brier score (calibrated) | 0.0229 |
 | ECE (calibrated) | 0.0029 |
 
+A logistic regression on 22 declared features is the baseline the 0.526 should
+be read against: it gets **PR-AUC 0.199**, so the gradient boosting model is
+worth **2.6 times** it, against a base rate of 0.035.
+
 Platt scaling won on the temporal holdout inside the calibration partition
 (Brier 0.01825, against 0.01833 uncalibrated and 0.01853 isotonic). Cross
 validation inside the training window gave a mean PR-AUC of 0.628 across four
 expanding-window folds.
 
-![Reliability of the raw score and of the calibrated probability](reports/figures/fig2_calibration_before_after.png)
+![Reliability curves for the raw score, Platt and isotonic, and the Brier scores that decided](reports/figures/fig2_calibration_before_after.png)
+
+**Reported by decile, not only in aggregate**, because the average hides the
+error where the money is: the ECE over the whole partition is 0.0029, but in the
+top score decile the gap is **0.0256**, where the model predicts 27.2 % fraud and
+observes 24.6 %. That is the decile the review queue is filled from.
 
 Of the 412 features, 399 were split on at least once and the top 25 carry 57.3 %
 of the total gain. Per column the picture is not the one the column counts
@@ -199,6 +208,29 @@ queue either. Within its assumed range the only way it could matter is by
 pushing cases below `V > 0`, and on this data it never binds: it takes roughly
 `r = 50` before the value-ranked queue declines to spend its capacity, which is
 25 times the assumed cost of an analyst touching a case.
+
+### And how big is the queue?
+
+Capacity is not an assumption about the business, it is a fact about an
+operation, so it is swept separately.
+
+![Cost of each policy by queue size, and the absolute and relative saving](reports/figures/fig13_capacity_sweep.png)
+
+| Capacity | Reviews | By score | By value | Saving |
+|---|---|---|---|---|
+| **none** | 0 | **$32.49** | **$32.49** | |
+| 0.2 % | 137 | $32.51 | $29.77 | $2.74 |
+| 0.5 % | 363 | $32.49 | $26.64 | $5.85 |
+| 1.0 % | 737 | $32.21 | $22.65 | $9.56 |
+| 2.0 % | 1,489 | $30.45 | $19.46 | $10.98 |
+| 5.0 % | 3,745 | $22.04 | $14.00 | $8.04 |
+
+**A score-ranked queue is worth less than nothing until it is fairly large.** At
+0.2 % capacity it costs more than having no queue at all, and it does not pay for
+itself until 1 %: its first analysts go to cases at `p > 0.9` that the automatic
+rule was already blocking, so each review costs `r` and changes nothing. **The
+value-ranked queue is ahead from the very first analyst.** The dollar saving
+peaks at 2 % of volume, which is where a marginal analyst is worth most.
 
 ---
 
