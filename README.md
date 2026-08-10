@@ -45,6 +45,15 @@ rather than deciding it automatically.
 score concentrates analysts where the system is already confident, and where a
 human therefore adds little. **This project measures what that costs.**
 
+**The argument needs one fact about the data to be worth anything, and the data
+supplies it.** The fraud rate is essentially flat along the amount axis: the top
+amount decile runs at 5.1 % against 5.6 % for the bottom. But the top amount
+quartile holds **31.5 % of the fraudulent cases and 75.5 % of the fraudulent
+money**. Probability barely moves with the amount and the loss moves by a factor
+of three, so a queue sorted by probability is sorted on the axis that carries no
+money. Had the fraud been concentrated in small amounts, `V` would still peak at
+moderate `p` by algebra and the dollar difference would have been negligible.
+
 ![Decision regions over probability and amount, beside where the test data actually falls](reports/figures/fig4_regions_and_joint_distribution.png)
 
 The left panel is the decision boundary the cost model implies: it bends with
@@ -168,6 +177,37 @@ it does not measure whether the analyst changed the outcome, and only the second
 is worth paying for. `docs/report.md` §8.5 works through it.
 
 ![ROC and precision-recall curves with the three operating points](reports/figures/fig7_roc_and_pr_curves.png)
+
+### Overtraining, measured where it can be measured
+
+The split here is **temporal**, and that changes which diagnostic answers the
+question. Comparing the score on train against the score on test would sum
+overtraining and genuine drift without separating them. The clean measurement
+records PR-AUC per boosting round on the fit window and the validation window of
+the **same** cross-validation fold, which are adjacent in time, so drift is
+roughly constant between them and what is left is the gap.
+
+![PR-AUC per boosting round on the fit and validation windows, one panel per fold](reports/figures/fig10_learning_curve.png)
+
+| | PR-AUC | What separates it from the row above |
+|---|---|---|
+| Fit window, at the chosen round | 0.968 | |
+| Validation window, same fold | 0.628 | **Overtraining** |
+| Held-out test | 0.526 | **Temporal distance**, not overtraining: both rows are out of sample |
+
+The gap of 0.34 is not a defect: early stopping selected the round where the
+validation curve peaks, so training less would leave performance on the table.
+The folds are retrained by `make diagnostics`, which aborts unless they choose
+the 1,129 trees the persisted booster already has.
+
+The Kolmogorov-Smirnov comparison is reported too, and read as a distance rather
+than a p-value. On fraudulent transactions train sits far from both other
+partitions (`D` = 0.399 and 0.412) while the two the model never saw sit on top
+of each other (`D` = 0.027): drift would have moved those apart as well, and did
+not. The same table carries its own warning about sample size, since `D` = 0.023
+comes with p = 1.4e-16 while a **larger** `D` = 0.027 comes with p = 0.317,
+purely because there are 28 times fewer fraudulent rows. `docs/report.md` §8.3
+and §8.4.
 
 ---
 
