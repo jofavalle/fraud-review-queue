@@ -10,7 +10,6 @@ dependencies = [
     "lightgbm>=4.6.0",
     "matplotlib>=3.11.0",
     "numpy>=2.4.6",
-    "optuna>=4.9.0",
     "pandas>=3.0.3",
     "pyarrow>=25.0.0",
     "pydantic>=2.13.4",
