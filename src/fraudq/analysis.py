@@ -5,6 +5,7 @@
 Reads what `fraudq.pipeline` left on disk and writes:
 
     reports/sensitivity_tornado.csv   the one at a time sweep over the cost assumptions
+    reports/capacity_sweep.csv        the saving as a function of queue size
     reports/drift_by_week.csv         PR-AUC and fraud rate across the test window
     reports/analysis_summary.json     the figures the README quotes
 
@@ -33,7 +34,7 @@ import pandas as pd
 from fraudq.config import CONFIG, FIGURES_DIR, SENSITIVITY_RANGES
 from fraudq.evaluate.drift import performance_by_month
 from fraudq.evaluate.policies import compare_policies, fit_single_threshold
-from fraudq.evaluate.sensitivity import savings_per_1k, tornado_data
+from fraudq.evaluate.sensitivity import capacity_sweep, savings_per_1k, tornado_data
 
 REPORTS_DIR = FIGURES_DIR.parent
 
@@ -72,6 +73,19 @@ def conclusion_survives(tornado: pd.DataFrame) -> bool:
     return bool((tornado[["savings_at_low", "savings_at_high"]] > 0).all().all())
 
 
+def _breakeven_capacity(swept: pd.DataFrame, no_queue_cost: float) -> float | None:
+    """The smallest swept capacity at which the score-ranked queue beats no queue.
+
+    A queue is not free: every review costs `r`, and a review of a case the
+    automatic rule had already decided correctly buys nothing at all. So a
+    score-ranked queue can cost MORE than not having one, and the capacity where
+    that stops being true is a number worth reporting rather than assuming away.
+    `None` means it never does within the swept range.
+    """
+    beats = swept[swept["cost_by_score"] < no_queue_cost]
+    return float(beats["capacity_pct"].min()) if len(beats) else None
+
+
 def _load(reports_dir: Path, name: str) -> pd.DataFrame:
     path = reports_dir / name
     if not path.exists():
@@ -89,7 +103,7 @@ def run_analysis(reports_dir: Path) -> dict:
     scored_test = _load(reports_dir, "scored_test.parquet")
     capacity_pct = CONFIG.policy.daily_capacity_pct
 
-    print("[1/2] Cost sensitivity, one parameter at a time")
+    print("[1/3] Cost sensitivity, one parameter at a time")
     evaluate = make_evaluate_fn(scored_calib, scored_test, capacity_pct)
     threshold = fit_single_threshold(scored_calib, CONFIG.cost)
     base_savings = savings_per_1k(evaluate(CONFIG.cost))
@@ -99,7 +113,26 @@ def run_analysis(reports_dir: Path) -> dict:
     print(f"  Savings at base assumptions: {base_savings:.4f} per $1,000")
     print(tornado.to_string(index=False, float_format=lambda v: f"{v:.4f}"))
 
-    print(f"[2/2] Drift across the test window, {DRIFT_BIN_DAYS} day bins")
+    print("[2/3] Capacity sweep, the one structural parameter")
+    # The threshold belongs to policy 2, which has no queue, so it does not move
+    # with capacity and is fitted once outside the loop.
+    #
+    # The leading 0.0 is a REFERENCE, not a swept point: at zero capacity both
+    # queue policies collapse to the same automatic rule, so that row is what a
+    # queue has to beat. Without it the other rows have no scale, and the fact
+    # that a small score-ranked queue costs MORE than having no queue at all
+    # would be invisible. The swept points themselves are exactly
+    # `PolicyConfig.capacity_sweep`, fixed in config before any result was seen.
+    capacity = capacity_sweep(
+        (0.0, *CONFIG.policy.capacity_sweep),
+        lambda pct: compare_policies(scored_test, CONFIG.cost, pct, threshold),
+    )
+    capacity.to_csv(reports_dir / "capacity_sweep.csv", index=False)
+    print(capacity.to_string(index=False, float_format=lambda v: f"{v:.4f}"))
+    no_queue = capacity.iloc[0]
+    swept = capacity.iloc[1:]
+
+    print(f"[3/3] Drift across the test window, {DRIFT_BIN_DAYS} day bins")
     drift = performance_by_month(scored_test, days_per_month=DRIFT_BIN_DAYS)
     drift = drift.rename(columns={"month": "week"})
     drift.to_csv(reports_dir / "drift_by_week.csv", index=False)
@@ -112,6 +145,16 @@ def run_analysis(reports_dir: Path) -> dict:
         "conclusion_survives_range": conclusion_survives(tornado),
         "dominant_param": str(tornado.iloc[0]["param"]),
         "drift_bin_days": DRIFT_BIN_DAYS,
+        "capacity_sweep_pcts": [float(p) for p in CONFIG.policy.capacity_sweep],
+        # The zero row is the reference, so it is excluded from these: at zero
+        # capacity the saving is zero by construction, not by measurement.
+        "savings_survive_capacity_sweep": bool((swept["savings_per_1k"] > 0).all()),
+        "min_savings_over_capacity": float(swept["savings_per_1k"].min()),
+        "best_capacity_pct": float(swept.loc[swept["savings_per_1k"].idxmax(), "capacity_pct"]),
+        "no_queue_cost_per_1k": float(no_queue["cost_by_value"]),
+        # The capacity at which a SCORE-ranked queue starts paying for itself.
+        # NaN would mean it never does within the swept range.
+        "score_queue_breaks_even_at": _breakeven_capacity(swept, float(no_queue["cost_by_score"])),
     }
     (reports_dir / "analysis_summary.json").write_text(json.dumps(summary, indent=2) + "\n")
     print(f"  {summary}")

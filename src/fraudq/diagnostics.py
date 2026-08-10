@@ -12,6 +12,9 @@ reports on the MODEL underneath it, and writes:
     reports/roc_curve.csv             the full ROC over test
     reports/pr_curve.csv              the full precision-recall curve
     reports/operating_points.csv      where the queues sit on them
+    reports/calibration_by_decile.csv calibration where the decisions are made
+    reports/reliability_curves.csv    raw, Platt and isotonic side by side
+    reports/calibration_comparison.csv  Brier and ECE per calibrator
     reports/score_ks.csv              KS between partitions, by class
     reports/feature_correlation.csv   Spearman over the top features
     reports/v_null_blocks.csv         the Vesta blocks, by null pattern
@@ -62,15 +65,18 @@ from fraudq.evaluate.diagnostics import (
     correlation_matrix,
     importance_table,
     learning_curve_folds,
+    logistic_baseline,
     null_pattern_blocks,
     operating_points_table,
     overtraining_summary,
     pr_points,
+    reliability_by_method,
     roc_points,
     score_ks_table,
     top_features,
 )
 from fraudq.evaluate.drift import psi_by_month
+from fraudq.evaluate.metrics import calibration_by_decile
 from fraudq.models.persist import load_artifacts
 from fraudq.models.train import predict_scores
 from fraudq.pipeline import lgbm_params, load_processed, prepare
@@ -130,12 +136,29 @@ def run_cheap_phases(reports_dir: Path, models_dir: Path, cfg: Config) -> dict:
     _write(points, reports_dir, "operating_points.csv")
     print(points.to_string(index=False, float_format=lambda v: f"{v:.4f}"))
 
-    print("[3/6] Score distributions: KS between the partitions already scored")
+    print("[3/6] Calibration in detail, and the KS between the partitions already scored")
     scored_calib = _load(reports_dir, "scored_calib.parquet")
+
+    # design.md §6.3 argues that the aggregate hides the error where the
+    # expensive decisions are made. Deciles come from the RAW score, so decile 9
+    # is "the 10 % the model finds most suspicious" whatever the calibrator did.
+    deciles = calibration_by_decile(y_test, scored_test["p"], scored_test["score_raw"])
+    _write(deciles, reports_dir, "calibration_by_decile.csv")
+    print(deciles.to_string(index=False, float_format=lambda v: f"{v:.4f}"))
+
+    # design.md §6.2 promises the three reliability curves side by side, and the
+    # pipeline had only ever printed the table behind them.
+    curves, calib_summary = reliability_by_method(scored_calib)
+    _write(curves, reports_dir, "reliability_curves.csv")
+    _write(calib_summary, reports_dir, "calibration_comparison.csv")
+    print(calib_summary.to_string(index=False, float_format=lambda v: f"{v:.5f}"))
+
     ks_cheap = score_ks_table({"calib": scored_calib, "test": scored_test})
     print(ks_cheap.to_string(index=False, float_format=lambda v: f"{v:.4g}"))
 
     return {
+        "deciles": deciles,
+        "calib_summary": calib_summary,
         "booster": booster,
         "feature_cols": feature_cols,
         "cost_cfg": cost_cfg,
@@ -232,6 +255,13 @@ def run_feature_phases(
         f"{parts['train']['day'].min()}-{parts['train']['day'].max()}"
     )
 
+    print("  Logistic baseline (design.md §6.1), on a small declared feature set")
+    baseline = logistic_baseline(parts["train"], parts["test"])
+    print(
+        f"    {baseline['baseline_features']} features: "
+        f"PR-AUC {baseline['baseline_pr_auc']:.4f}, ROC-AUC {baseline['baseline_roc_auc']:.4f}"
+    )
+
     print("[5/6] Redundancy, feature drift, and the KS that mixes both effects")
     ranked = top_features(cheap["importance"], top_n)
 
@@ -266,6 +296,7 @@ def run_feature_phases(
     gc.collect()
 
     summary = {
+        **baseline,
         "n_features": len(feature_cols),
         "top_n_features": top_n,
         "score_reproduction_max_abs_diff": max_diff,

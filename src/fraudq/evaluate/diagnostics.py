@@ -488,6 +488,122 @@ def learning_curve_folds(
     return pd.concat(frames, ignore_index=True)
 
 
+#: Features for the logistic baseline of design.md §6.1. Deliberately NOT the
+#: top of the gain ranking: a baseline that borrowed the trained model's own
+#: importances would be measuring how much of that model a linear form can
+#: recover, not what a simple honest model achieves on its own. These are the
+#: §5.1 base features, the four frequency encodings and the C family, chosen
+#: from the design document rather than from any result.
+BASELINE_FEATURES = (
+    "TransactionAmt",
+    "amt_log",
+    "amt_decimal",
+    "hour",
+    "card1_freq",
+    "addr1_freq",
+    "P_emaildomain_freq",
+    "R_emaildomain_freq",
+    *(f"C{i}" for i in range(1, 15)),
+)
+
+
+def logistic_baseline(
+    df_train: pd.DataFrame,
+    df_test: pd.DataFrame,
+    features: tuple[str, ...] = BASELINE_FEATURES,
+    target: str = "isFraud",
+) -> dict:
+    """The honest baseline of design.md §6.1: logistic regression, fitted on train.
+
+    Its job is to give the LightGBM number something to be read against. A
+    PR-AUC of 0.526 means nothing on its own; it means something next to what a
+    median-imputed, standardised linear model gets on the same partition.
+
+    Same rules as the real model, or the comparison would not be one:
+    `class_weight=None` (no resampling, §6.2), fitted on train only, evaluated
+    on the same held-out test partition, and never consulted for any decision.
+    """
+    from fraudq.evaluate.metrics import pr_auc, roc_auc
+    from fraudq.models.train import predict_scores, train_logistic_baseline
+
+    present = [f for f in features if f in df_train.columns and f in df_test.columns]
+    if not present:
+        raise KeyError(f"None of the baseline features are present: {list(features)}.")
+
+    model = train_logistic_baseline(df_train, present, target=target)
+    scores = predict_scores(model, df_test, present)
+    y = df_test[target].to_numpy()
+    return {
+        "baseline_features": len(present),
+        "baseline_pr_auc": pr_auc(y, scores),
+        "baseline_roc_auc": roc_auc(y, scores),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Calibration, all three methods side by side
+# ---------------------------------------------------------------------------
+
+
+def reliability_by_method(
+    scored_calib: pd.DataFrame,
+    holdout_days: int = 6,
+    n_bins: int = 10,
+    score_col: str = "score_raw",
+    target: str = "isFraud",
+    day_col: str = "day",
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Reliability curves for the raw score, Platt and isotonic, side by side.
+
+    design.md §6.2 promises exactly this figure, and the pipeline had only ever
+    printed the Brier table behind it. The comparison reproduces the pipeline's
+    own: fit on the first days of calib, evaluate on the last `holdout_days`
+    (`temporal_calibration_split`), because comparing on the data used to fit
+    would always favour isotonic, which is the more flexible of the two.
+
+    The calibrators are fitted once and used for both outputs, so the curves and
+    the scores cannot drift apart.
+
+    Returns
+    -------
+    (curves, summary). `curves` is long format, one row per method and
+    non-empty bin, ready to plot. `summary` carries Brier and ECE per method,
+    and must reproduce the numbers the pipeline printed.
+    """
+    from fraudq.evaluate.metrics import reliability_table
+    from fraudq.models.calibrate import (
+        evaluate_calibrator,
+        fit_isotonic,
+        fit_platt,
+        temporal_calibration_split,
+    )
+
+    fit_df, hold_df = temporal_calibration_split(
+        scored_calib, holdout_days=holdout_days, day_col=day_col
+    )
+    fit_scores, fit_y = fit_df[score_col], fit_df[target]
+    hold_scores = hold_df[score_col].to_numpy(dtype=float)
+    hold_y = hold_df[target].to_numpy(dtype=float)
+
+    calibrators = {
+        "raw": None,
+        "platt": fit_platt(fit_scores, fit_y),
+        "isotonic": fit_isotonic(fit_scores, fit_y),
+    }
+
+    curves, rows = [], {}
+    for name, calibrator in calibrators.items():
+        p = hold_scores if calibrator is None else calibrator.predict(hold_scores)
+        table = reliability_table(hold_y, p, n_bins=n_bins)
+        table.insert(0, "method", name)
+        curves.append(table)
+        rows[name] = evaluate_calibrator(calibrator, hold_scores, hold_y, n_bins=n_bins)
+
+    summary = pd.DataFrame(rows).T
+    summary.index.name = "calibrator"
+    return pd.concat(curves, ignore_index=True), summary.reset_index()
+
+
 def overtraining_summary(curve: pd.DataFrame) -> pd.DataFrame:
     """One row per fold, read at `best_iteration`: the numbers a report quotes.
 

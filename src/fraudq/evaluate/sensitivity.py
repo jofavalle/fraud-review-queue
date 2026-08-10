@@ -97,6 +97,60 @@ def tornado_data(base_cfg, ranges: dict, evaluate_fn) -> pd.DataFrame:
     )
 
 
+def capacity_sweep(capacities, evaluate_fn) -> pd.DataFrame:
+    """The saving as a function of how big the review queue is (design.md §2.3).
+
+    The tornado sweeps the four COST assumptions. This sweeps the one structural
+    parameter, and it is a different question: the costs are guesses about the
+    business, whereas capacity is a fact about the operation that a reader will
+    want to substitute their own value into. A result measured at one capacity
+    says nothing about whether it survives a queue five times larger.
+
+    It is the same kind of cheap as the tornado. Capacity changes which
+    transactions the policies pick, not what the model predicted, so it runs off
+    the persisted scoring and looks at test again for nothing.
+
+    The column to read second is `utilization_by_value`. Policy 4 refuses to
+    review a case with `V <= 0`, so past some capacity it stops spending what it
+    is given, and the saving flattens instead of growing. Where that happens is
+    an output of this sweep, not an assumption in it.
+
+    Parameters
+    ----------
+    capacities:
+        Fractions of daily volume, typically `PolicyConfig.capacity_sweep`.
+    evaluate_fn:
+        callable(capacity_pct) -> the compare_policies DataFrame.
+
+    Returns
+    -------
+    One row per capacity, ordered as given: `capacity_pct`, `capacity`,
+    `reviews_by_value`, `utilization_by_value`, `cost_by_score`,
+    `cost_by_value`, `savings_per_1k`, `savings_pct`.
+    """
+    rows = []
+    for pct in capacities:
+        comparison = evaluate_fn(pct)
+        by_score = comparison.loc["topk_by_score"]
+        by_value = comparison.loc["topk_by_value"]
+        saving = savings_per_1k(comparison)
+        rows.append(
+            {
+                "capacity_pct": float(pct),
+                "capacity": int(by_value["capacity"]),
+                "reviews_by_value": int(by_value["reviews"]),
+                "utilization_by_value": float(by_value["utilization"]),
+                "cost_by_score": float(by_score["cost_per_1k"]),
+                "cost_by_value": float(by_value["cost_per_1k"]),
+                "savings_per_1k": saving,
+                # Relative to the score-ranked queue, which is what the headline
+                # "29.7 % reduction" is relative to as well.
+                "savings_pct": 100.0 * saving / float(by_score["cost_per_1k"]),
+            }
+        )
+    return pd.DataFrame(rows)
+
+
 def sensitivity_grid_2d(
     base_cfg, param_x: str, values_x, param_y: str, values_y, evaluate_fn
 ) -> pd.DataFrame:

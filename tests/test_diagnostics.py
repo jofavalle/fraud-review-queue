@@ -28,16 +28,19 @@ from types import SimpleNamespace
 
 from fraudq.data.split import expanding_window_folds
 from fraudq.evaluate.diagnostics import (
+    BASELINE_FEATURES,
     KS_PAIRS,
     correlation_matrix,
     importance_table,
     ks_two_sample,
     learning_curve_folds,
+    logistic_baseline,
     null_pattern_blocks,
     operating_points_table,
     overtraining_summary,
     pr_points,
     queue_operating_point,
+    reliability_by_method,
     roc_points,
     score_ks_table,
     top_features,
@@ -457,3 +460,73 @@ def test_learning_curve_refuses_resampling_parameters(trainable, folds):
     df, cols = trainable
     with pytest.raises(ValueError, match="Resampling parameters forbidden"):
         learning_curve_folds(df, cols, folds, {**_LGBM_PARAMS, "scale_pos_weight": 5.0})
+
+
+# ------------------------------------------------- calibration in detail
+
+
+def test_reliability_by_method_covers_the_three_calibrators(scored):
+    """design.md §6.2 promises raw, Platt and isotonic side by side, and the
+    figure needs one curve per method out of a single fit."""
+    calib = scored.rename(columns={"p": "score_raw"})
+    curves, summary = reliability_by_method(calib, holdout_days=6)
+
+    assert set(curves["method"]) == {"raw", "platt", "isotonic"}
+    assert summary["calibrator"].tolist() == ["raw", "platt", "isotonic"]
+    assert set(summary.columns) == {"calibrator", "brier", "ece"}
+    assert (summary[["brier", "ece"]] >= 0).all().all()
+
+
+def test_reliability_curves_stay_inside_the_unit_square(scored):
+    curves, _ = reliability_by_method(scored.rename(columns={"p": "score_raw"}), holdout_days=6)
+    assert curves["mean_p"].between(0.0, 1.0).all()
+    assert curves["frac_pos"].between(0.0, 1.0).all()
+
+
+def test_reliability_uses_a_temporal_holdout_not_a_random_one(scored):
+    """The calibrator comparison respects the arrow of time like everything else.
+    Shuffling the rows must not change the answer, because the split is by day
+    and not by position."""
+    calib = scored.rename(columns={"p": "score_raw"})
+    _, ordered = reliability_by_method(calib, holdout_days=6)
+    _, shuffled = reliability_by_method(
+        calib.sample(frac=1.0, random_state=3).reset_index(drop=True), holdout_days=6
+    )
+    assert np.allclose(ordered["brier"], shuffled["brier"])
+
+
+# ---------------------------------------------------- logistic baseline
+
+
+def test_logistic_baseline_reports_both_metrics(trainable):
+    df, cols = trainable
+    train, test = df[df["day"] < 100], df[df["day"] >= 100]
+    result = logistic_baseline(train, test, features=tuple(cols[:5]))
+
+    assert result["baseline_features"] == 5
+    assert 0.0 <= result["baseline_pr_auc"] <= 1.0
+    assert 0.0 <= result["baseline_roc_auc"] <= 1.0
+
+
+def test_logistic_baseline_beats_chance_on_separable_data(trainable):
+    """A baseline that could not beat the base rate would say nothing about the
+    model it is meant to be read against."""
+    df, cols = trainable
+    train, test = df[df["day"] < 100], df[df["day"] >= 100]
+    result = logistic_baseline(train, test, features=tuple(cols[:5]))
+    assert result["baseline_roc_auc"] > 0.55
+
+
+def test_logistic_baseline_raises_when_no_feature_is_present(trainable):
+    df, _ = trainable
+    with pytest.raises(KeyError, match="baseline features"):
+        logistic_baseline(df, df, features=("not_a_column",))
+
+
+def test_the_baseline_feature_set_is_declared_not_derived_from_the_model():
+    """The point of the choice, encoded. A baseline built from the trained
+    model's own top features would measure how much of that model a linear form
+    recovers, which is a different and much less interesting question."""
+    assert "TransactionAmt" in BASELINE_FEATURES
+    assert all(f"C{i}" in BASELINE_FEATURES for i in range(1, 15))
+    assert not any(f.startswith("V") for f in BASELINE_FEATURES)
